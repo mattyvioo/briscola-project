@@ -1,5 +1,7 @@
 import { DECK_IDS, deckStyle, type DeckId } from '../game/decks'
+import { MATCH_FORMATS, matchTarget, type MatchFormat } from '../game/match'
 import { DELAY_OPTIONS, type MatchSettings } from '../game/settings'
+import { PLAYER_COUNTS, type PlayerCount } from '../game/table'
 import { isValidRoomCode, normaliseRoomCode, ROOM_CODE_LENGTH } from '../net/protocol'
 import { suitPip } from './card'
 import { el } from './dom'
@@ -36,8 +38,47 @@ export function settingsPanel(
 
   const paceRow = el('div', { class: 'setting-options' })
   const deckRow = el('div', { class: 'setting-options' })
+  const formatRow = el('div', { class: 'setting-options' })
+  const playersRow = el('div', { class: 'setting-options' })
+
+  const sameFormat = (a: MatchFormat, b: MatchFormat) =>
+    a.kind === b.kind && matchTarget(a) === matchTarget(b)
 
   function render() {
+    playersRow.replaceChildren(
+      ...PLAYER_COUNTS.map((n: PlayerCount) => {
+        const b = el(
+          'button',
+          {
+            class: `chip${n === current.players ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-pressed': n === current.players,
+          },
+          el('span', { class: 'chip-label', text: String(n) }),
+          el('span', { class: 'chip-hint', text: n === 4 ? '2 v 2' : n === 3 ? 'a tre' : '1 v 1' }),
+        )
+        b.addEventListener('click', () => update({ players: n }))
+        return b
+      }),
+    )
+
+    formatRow.replaceChildren(
+      ...MATCH_FORMATS.map(opt => {
+        const b = el(
+          'button',
+          {
+            class: `chip${sameFormat(opt.format, current.format) ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-pressed': sameFormat(opt.format, current.format),
+          },
+          el('span', { class: 'chip-label', text: opt.label }),
+          el('span', { class: 'chip-hint', text: opt.hint }),
+        )
+        b.addEventListener('click', () => update({ format: opt.format }))
+        return b
+      }),
+    )
+
     paceRow.replaceChildren(
       ...DELAY_OPTIONS.map(opt => {
         const b = el(
@@ -86,6 +127,24 @@ export function settingsPanel(
     'details',
     { class: 'settings' },
     el('summary', {}, el('span', { text: t.settings }), el('span', { class: 'muted small', text: t.settingsHint })),
+    opts.showPace
+      ? el(
+          'div',
+          { class: 'setting' },
+          el('span', { class: 'field-label', text: t.players }),
+          el('span', { class: 'muted small', text: t.playersHint }),
+          playersRow,
+        )
+      : null,
+    opts.showPace
+      ? el(
+          'div',
+          { class: 'setting' },
+          el('span', { class: 'field-label', text: t.format }),
+          el('span', { class: 'muted small', text: t.formatHint }),
+          formatRow,
+        )
+      : null,
     opts.showPace
       ? el(
           'div',

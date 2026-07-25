@@ -98,12 +98,12 @@ function startTable(
 }
 
 function playAi() {
-  const s = aiSession(settings)
+  const s = aiSession(settings, settings.players)
   startTable(s, 'ai', null, () => s.start())
 }
 
 function playHotseat() {
-  const s = hotseatSession(settings)
+  const s = hotseatSession(settings, settings.players)
   startTable(s, 'hotseat', null, () => s.start())
 }
 

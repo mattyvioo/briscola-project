@@ -1,17 +1,23 @@
 import { DEFAULT_DECK, isDeckId, type DeckId } from './decks'
+import { isMatchFormat, type MatchFormat } from './match'
+import { isPlayerCount, type PlayerCount } from './table'
 
 /**
  * Match settings chosen before the game starts.
  *
- * In an online game the *host's* settings govern: the host owns the state and
- * drives trick timing, so a guest choosing a different pace would just
- * desynchronise the two boards. Deck style is per-player though — it is pure
- * presentation, so each side renders whichever pack they picked.
+ * In an online game the *host's* settings govern: the host owns the state, so
+ * a guest choosing its own pace or table size would just desynchronise the
+ * boards. Deck style is the one setting either side may change — the host
+ * still applies it and rebroadcasts, so both boards stay in step.
  */
 export interface MatchSettings {
   /** How long a completed trick stays face-up, in milliseconds. */
   readonly trickDelayMs: number
   readonly deck: DeckId
+  /** How many hands decide the partita. */
+  readonly format: MatchFormat
+  /** Seats at the table, human or otherwise. */
+  readonly players: PlayerCount
 }
 
 export interface DelayOption {
@@ -34,6 +40,8 @@ export const DELAY_OPTIONS: readonly DelayOption[] = [
 export const DEFAULT_SETTINGS: MatchSettings = {
   trickDelayMs: 1400,
   deck: DEFAULT_DECK,
+  format: { kind: 'single' },
+  players: 2,
 }
 
 const STORAGE_KEY = 'briscola.settings'
@@ -45,6 +53,8 @@ export function normaliseSettings(value: unknown): MatchSettings {
   return {
     trickDelayMs: Number.isFinite(ms) ? Math.min(8000, Math.max(300, ms)) : DEFAULT_SETTINGS.trickDelayMs,
     deck: isDeckId(raw.deck) ? raw.deck : DEFAULT_SETTINGS.deck,
+    format: isMatchFormat(raw.format) ? raw.format : DEFAULT_SETTINGS.format,
+    players: isPlayerCount(raw.players) ? raw.players : DEFAULT_SETTINGS.players,
   }
 }
 

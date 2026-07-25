@@ -988,3 +988,29 @@ body {
 .mini-won .card {
   box-shadow: 0 0 0 2px var(--gold), 0 1px 3px #00000059;
 }
+
+/* Match score chip in the HUD, shown only for multi-hand partite. */
+.match-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: #00000047;
+  border: 1px solid var(--gold-dim);
+}
+.match-chip[hidden] {
+  display: none;
+}
+.match-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+.match-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}

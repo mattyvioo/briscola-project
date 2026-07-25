@@ -309,3 +309,67 @@ describe('seat control', () => {
     expect(views.length).toBe(before)
   })
 })
+
+describe('match play through a session', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** Plays hands to completion, pressing "next hand" until the match decides. */
+  function playMatch(format: Parameters<typeof aiSession>[0]['format'], maxHands = 12) {
+    const views: PublicView[] = []
+    const s = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5, format })
+    s.onView(v => views.push(v))
+    s.start()
+
+    for (let hand = 0; hand < maxHands; hand++) {
+      let guard = 0
+      while (views.at(-1)!.phase === 'playing') {
+        if (guard++ > 400) throw new Error('hand did not finish')
+        vi.advanceTimersByTime(100)
+        const v = views.at(-1)!
+        if (v.phase === 'playing' && v.turn === 0 && !v.resolving && v.hand.length > 0) {
+          s.play(v.hand[0]!.id)
+        }
+      }
+      vi.advanceTimersByTime(100)
+      if (views.at(-1)!.match.decided) break
+      s.rematch()
+      vi.advanceTimersByTime(100)
+    }
+    return { views, last: views.at(-1)! }
+  }
+
+  it('decides a single-hand game in one hand', () => {
+    const { last } = playMatch({ kind: 'single' })
+    expect(last.phase).toBe('over')
+    expect(last.match.decided).toBe(true)
+    expect(last.match.handNumber).toBe(2) // recordHand advances past the played hand
+  })
+
+  it('plays a best-of-three to a conclusion', () => {
+    const { last } = playMatch({ kind: 'bestOf', target: 2 })
+    expect(last.match.decided).toBe(true)
+    expect(Math.max(...last.match.scores)).toBe(2)
+    // Two wins needed, so at most three hands plus any drawn ones.
+    expect(last.match.handNumber).toBeLessThanOrEqual(8)
+  })
+
+  it('accumulates points across hands in a points race', () => {
+    const { views } = playMatch({ kind: 'points', target: 301 })
+    const totals = views
+      .filter(v => v.phase === 'over')
+      .map(v => v.match.scores.reduce((a, b) => a + b, 0))
+    // Every completed hand adds exactly 120 to the pot.
+    for (const total of totals) expect(total % TOTAL_POINTS).toBe(0)
+    expect(views.at(-1)!.match.decided).toBe(true)
+  })
+
+  it('carries the match into every view so both players see the same score', () => {
+    const { views } = playMatch({ kind: 'bestOf', target: 2 })
+    for (const v of views) {
+      expect(v.match.scores).toHaveLength(2)
+      expect(v.match.myTeam).toBe(0)
+      expect(v.match.myScore).toBe(v.match.scores[0])
+    }
+  })
+})

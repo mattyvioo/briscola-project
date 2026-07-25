@@ -1,7 +1,17 @@
 import { chooseCard } from '../game/ai'
 import type { CardId } from '../game/deck'
 import { isDeckId, type DeckId } from '../game/decks'
-import { cardsLeftToDraw, newGame, play, score, tricksLeft, type GameState } from '../game/engine'
+import {
+  allTeamScores,
+  cardsLeftToDraw,
+  newGame,
+  play,
+  score,
+  tricksLeft,
+  type GameState,
+} from '../game/engine'
+import { matchScores, newMatch, recordHand, type MatchState } from '../game/match'
+import { teamOf } from '../game/table'
 import { nextSeat, other, type Seat } from '../game/rules'
 import { randomSeed } from '../game/rng'
 import { DEFAULT_SETTINGS, type MatchSettings } from '../game/settings'
@@ -72,6 +82,7 @@ function viewFor(
   state: GameState,
   seat: Seat,
   deck: DeckId,
+  match: MatchState,
   opts: { table?: PublicView['table']; resolving?: boolean; lastWinner?: Seat | null } = {},
 ): PublicView {
   const players = state.config.players
@@ -96,6 +107,15 @@ function viewFor(
     phase: state.phase,
     resolving: opts.resolving ?? false,
     lastWinner: opts.lastWinner ?? null,
+    match: {
+      format: match.format,
+      handNumber: match.handNumber,
+      decided: match.decided,
+      myScore: matchScores(match)[teamOf(state.config, seat)] ?? 0,
+      scores: matchScores(match),
+      myTeam: teamOf(state.config, seat),
+      winners: match.winners,
+    },
   }
 }
 
@@ -106,7 +126,7 @@ function lastTrickFor(state: GameState, seat: Seat): PublicView['lastTrick'] {
   return { plays: t.plays, winner: t.winner, iWon: t.winner === seat, points: t.points }
 }
 
-type ViewOpts = Parameters<typeof viewFor>[3]
+type ViewOpts = Parameters<typeof viewFor>[4]
 
 /** Shared plumbing for handler registration. */
 abstract class BaseSession implements Session {
@@ -192,6 +212,7 @@ export class GameSession extends BaseSession {
   protected settings: MatchSettings
   private dealer: Seat
   private players: PlayerCount
+  protected match: MatchState
   /** Which local seat the board is currently drawn for. */
   protected viewer: Seat
   private awaitingHandoff = false
@@ -208,6 +229,7 @@ export class GameSession extends BaseSession {
     this.settings = settings
     this.dealer = dealer
     this.state = newGame(seed, dealer, this.players)
+    this.match = newMatch(settings.format, this.state.config.teams.length)
     this.viewer = this.firstLocalSeat()
     this.mode = seats.some(s => s.control === 'remote')
       ? 'online'
@@ -234,7 +256,7 @@ export class GameSession extends BaseSession {
   }
 
   protected broadcast(opts?: ViewOpts) {
-    this.emit(viewFor(this.state, this.viewer, this.settings.deck, opts))
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, opts))
   }
 
   applySettings(next: MatchSettings) {
@@ -279,6 +301,10 @@ export class GameSession extends BaseSession {
     })
 
     this.later(() => {
+      // A finished hand only counts once the trick that ended it is swept.
+      if (this.state.phase === 'over') {
+        this.match = recordHand(this.match, this.state.config, allTeamScores(this.state))
+      }
       this.broadcast()
       if (this.state.phase === 'playing') this.advance()
     }, this.settings.trickDelayMs)
@@ -334,6 +360,10 @@ export class GameSession extends BaseSession {
     // Move the deal round the table, as you would in person.
     this.awaitingHandoff = false
     this.dealer = nextSeat(this.dealer, this.players)
+    // A decided partita starts over; an undecided one just deals the next hand.
+    if (this.match.decided) {
+      this.match = newMatch(this.settings.format, this.state.config.teams.length)
+    }
     this.state = newGame(randomSeed(), this.dealer, this.players)
     if (this.seats[this.state.turn]?.control === 'local') this.viewer = this.state.turn
     this.broadcast()
@@ -375,12 +405,12 @@ export class HostSession extends GameSession {
   }
 
   protected override broadcast(opts?: ViewOpts) {
-    this.emit(viewFor(this.state, this.viewer, this.settings.deck, opts))
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, opts))
     // Every remote seat gets its own view. Phase 4 targets these per peer;
     // with a single remote seat a broadcast reaches exactly the right browser.
     this.seats.forEach((seat, i) => {
       if (seat.control !== 'remote') return
-      this.send({ t: 'view', view: viewFor(this.state, i, this.settings.deck, opts) })
+      this.send({ t: 'view', view: viewFor(this.state, i, this.settings.deck, this.match, opts) })
     })
   }
 
@@ -517,7 +547,7 @@ export class GuestSession extends BaseSession {
 
 // --- convenience constructors ------------------------------------------------
 
-/** Solo play: seat 0 is you, the rest are bots. */
+/** Solo play: seat 0 is you, every other seat is a bot. */
 export function aiSession(settings: MatchSettings, players: PlayerCount = 2): GameSession {
   const seats: SeatConfig[] = [{ control: 'local' }]
   for (let i = 1; i < players; i++) seats.push({ control: 'ai' })

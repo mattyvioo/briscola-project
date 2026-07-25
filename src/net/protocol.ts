@@ -1,5 +1,6 @@
 import type { Card, CardId, Suit } from '../game/deck'
 import type { DeckId } from '../game/decks'
+import type { MatchFormat } from '../game/match'
 import type { Seat } from '../game/rules'
 import type { SoundId } from '../ui/sounds'
 
@@ -56,6 +57,23 @@ export interface PublicView {
   readonly resolving: boolean
   /** Who took the trick currently being shown, if any. */
   readonly lastWinner: Seat | null
+  /** The partita this hand belongs to. */
+  readonly match: MatchView
+}
+
+/**
+ * Match progress as one seat sees it. `scores` is whatever the format is
+ * racing — hands won, or accumulated card points.
+ */
+export interface MatchView {
+  readonly format: MatchFormat
+  readonly handNumber: number
+  readonly decided: boolean
+  readonly myTeam: number
+  readonly myScore: number
+  readonly scores: readonly number[]
+  /** Teams that took the partita. More than one is a dead heat. */
+  readonly winners: readonly number[]
 }
 
 export interface TrickSummary {

@@ -2,6 +2,7 @@ import type { Card, CardId } from '../game/deck'
 import { freshDeck, parseCard } from '../game/deck'
 import { DECK_IDS, deckStyle, suitName, type DeckId } from '../game/decks'
 import { other, TOTAL_POINTS, type Seat } from '../game/rules'
+import { matchTarget } from '../game/match'
 import { REACTIONS, type PublicView, type Reaction } from '../net/protocol'
 import type { SessionStatus } from '../net/session'
 import { cardBack, cardFace, preloadDeck, suitPip } from './card'
@@ -57,6 +58,7 @@ export class TableView {
   private reactionLayer: HTMLElement
   private soundTray: HTMLElement
   private deckBtn: HTMLElement
+  private matchChip: HTMLElement
 
   private view: PublicView | null = null
   private status: SessionStatus = { kind: 'waiting' }
@@ -70,6 +72,7 @@ export class TableView {
     private callbacks: TableCallbacks,
     private roomCode: string | null = null,
   ) {
+    this.matchChip = el('div', { class: 'match-chip', hidden: true })
     this.nameTheirs = el('span', { class: 'score-name' })
     this.hudTheirs = el('span', { class: 'score-value', text: '0' })
     this.nameMine = el('span', { class: 'score-name' })
@@ -111,7 +114,7 @@ export class TableView {
         'div',
         { class: 'hud' },
         el('div', { class: 'score score-theirs' }, this.nameTheirs, this.hudTheirs),
-        el('div', { class: 'hud-mid' }, this.deckBtn, leave),
+        el('div', { class: 'hud-mid' }, this.matchChip, this.deckBtn, leave),
         el('div', { class: 'score score-mine' }, this.nameMine, this.hudMine),
       ),
       this.opponentHand,
@@ -187,6 +190,7 @@ export class TableView {
     this.hudMine.textContent = String(view.myPoints)
     this.hudTheirs.textContent = String(view.opponentPoints)
 
+    this.renderMatch(view)
     this.renderOpponentHand(view)
     this.renderMyHand(view)
     this.renderStock(view)
@@ -291,6 +295,24 @@ export class TableView {
     node.style.setProperty('--delay', `${Math.round(Math.random() * 90)}ms`)
     this.reactionLayer.appendChild(node)
     node.addEventListener('animationend', () => node.remove())
+  }
+
+  /** Match score, shown only when a partita spans more than one hand. */
+  private renderMatch(view: PublicView) {
+    const m = view.match
+    if (m.format.kind === 'single') {
+      this.matchChip.hidden = true
+      return
+    }
+    this.matchChip.hidden = false
+    const mine = m.myScore
+    const best = Math.max(...m.scores.filter((_, i) => i !== m.myTeam), 0)
+    clear(this.matchChip)
+    this.matchChip.append(
+      el('span', { class: 'match-label', text: t.matchScore }),
+      el('span', { class: 'match-value', text: `${mine}\u2013${best}` }),
+    )
+    this.matchChip.title = `${t.handNumber(m.handNumber)} \u00b7 ${matchTarget(m.format) ?? ''}`
   }
 
   // --- board --------------------------------------------------------------
@@ -501,16 +523,26 @@ export class TableView {
     const theirs = view.opponentPoints
     const drew = mine === theirs
 
-    const heading =
-      this.mode === 'hotseat'
-        ? drew
-          ? t.draw
-          : t.playerWins((mine > theirs ? view.mySeat : other(view.mySeat)) + 1)
-        : drew
-          ? t.draw
-          : mine > theirs
-            ? t.youWin
-            : t.youLose
+    // A hand inside an undecided partita reads differently from the partita
+    // itself ending — otherwise "Hai vinto" appears five times in a best-of-5.
+    const m = view.match
+    const multiHand = m.format.kind !== 'single'
+    const matchOver = !multiHand || m.decided
+
+    let heading: string
+    if (matchOver && multiHand) {
+      heading = m.winners.length > 1
+        ? t.matchDraw
+        : m.winners[0] === m.myTeam
+          ? t.matchWon
+          : t.matchLost
+    } else if (this.mode === 'hotseat') {
+      heading = drew ? t.draw : t.playerWins((mine > theirs ? view.mySeat : other(view.mySeat)) + 1)
+    } else if (multiHand) {
+      heading = drew ? t.draw : mine > theirs ? t.handWon : t.handLost
+    } else {
+      heading = drew ? t.draw : mine > theirs ? t.youWin : t.youLose
+    }
 
     const { mine: mineLabel, theirs: theirsLabel } = this.labels(view)
     const outcomeClass = drew ? 'is-draw' : mine > theirs ? 'is-win' : 'is-loss'
@@ -528,10 +560,19 @@ export class TableView {
         el('div', { class: 'final-side' }, el('span', { class: 'muted', text: theirsLabel }), el('strong', { text: String(theirs) })),
       ),
       el('p', { class: 'muted small', text: `${mine + theirs} / ${TOTAL_POINTS}` }),
+      multiHand
+        ? el('p', {
+            class: 'muted small',
+            text: `${t.matchScore} ${m.myScore}\u2013${Math.max(...m.scores.filter((_, i) => i !== m.myTeam), 0)}`,
+          })
+        : null,
       el(
         'div',
         { class: 'panel-actions' },
-        this.primaryButton(t.rematch, () => this.callbacks.onRematch()),
+        this.primaryButton(
+          !multiHand ? t.rematch : matchOver ? t.newMatch : t.nextHand,
+          () => this.callbacks.onRematch(),
+        ),
         this.ghostButton(t.leave, () => this.callbacks.onLeave()),
       ),
     )
