@@ -1,9 +1,10 @@
-import type { CardId } from '../game/deck'
+import type { Card, CardId } from '../game/deck'
 import { parseCard } from '../game/deck'
+import { suitName, type DeckId } from '../game/decks'
 import { other, TOTAL_POINTS, type Seat } from '../game/rules'
-import type { PublicView } from '../net/protocol'
+import { REACTIONS, type PublicView, type Reaction } from '../net/protocol'
 import type { SessionStatus } from '../net/session'
-import { cardBack, cardFace } from './card'
+import { cardBack, cardFace, suitPip } from './card'
 import { clear, el, syncKeyed } from './dom'
 import { t } from './strings'
 
@@ -12,9 +13,13 @@ export interface TableCallbacks {
   onRematch(): void
   onLeave(): void
   onHandoff(): void
+  onReact(emoji: Reaction): void
 }
 
 type Mode = 'online' | 'ai' | 'hotseat'
+
+/** Reactions are cheap to send and easy to spam; one every 1.5s is plenty. */
+const REACTION_COOLDOWN_MS = 1500
 
 export class TableView {
   readonly root: HTMLElement
@@ -29,12 +34,17 @@ export class TableView {
   private stock: HTMLElement
   private banner: HTMLElement
   private overlay: HTMLElement
+  private lastTrickBox: HTMLElement
+  private reactionBar: HTMLElement
+  private reactionLayer: HTMLElement
 
   private view: PublicView | null = null
   private status: SessionStatus = { kind: 'waiting' }
+  private lastReactionAt = 0
 
   constructor(
     private mode: Mode,
+    private deck: DeckId,
     private callbacks: TableCallbacks,
     private roomCode: string | null = null,
   ) {
@@ -49,6 +59,9 @@ export class TableView {
     this.stock = el('div', { class: 'stock' })
     this.banner = el('div', { class: 'banner', role: 'status', 'aria-live': 'polite' })
     this.overlay = el('div', { class: 'overlay', hidden: true })
+    this.lastTrickBox = el('div', { class: 'last-trick', hidden: true })
+    this.reactionLayer = el('div', { class: 'reaction-layer', 'aria-hidden': 'true' })
+    this.reactionBar = this.buildReactionBar()
 
     const leave = el('button', { class: 'btn-ghost btn-leave', type: 'button' }, t.leave)
     leave.addEventListener('click', () => this.callbacks.onLeave())
@@ -64,9 +77,11 @@ export class TableView {
         el('div', { class: 'score score-mine' }, this.nameMine, this.hudMine),
       ),
       this.opponentHand,
-      el('div', { class: 'board' }, this.stock, this.trick),
+      el('div', { class: 'board' }, this.stock, this.trick, this.lastTrickBox),
       this.banner,
       this.myHand,
+      this.reactionBar,
+      this.reactionLayer,
       this.overlay,
     )
 
@@ -77,7 +92,6 @@ export class TableView {
       if (id && this.canPlay()) this.callbacks.onPlay(id)
     })
 
-    // Number keys as a desktop shortcut for the three cards in hand.
     this.onKeydown = this.onKeydown.bind(this)
     window.addEventListener('keydown', this.onKeydown)
   }
@@ -106,13 +120,9 @@ export class TableView {
     )
   }
 
-  /** "Tu"/"Avversario" online and vs the AI; numbered players in hotseat. */
   private labels(view: PublicView): { mine: string; theirs: string } {
     if (this.mode !== 'hotseat') return { mine: t.you, theirs: t.opponent }
-    return {
-      mine: t.player(view.mySeat + 1),
-      theirs: t.player(other(view.mySeat) + 1),
-    }
+    return { mine: t.player(view.mySeat + 1), theirs: t.player(other(view.mySeat) + 1) }
   }
 
   setStatus(status: SessionStatus) {
@@ -138,12 +148,50 @@ export class TableView {
     this.renderMyHand(view)
     this.renderStock(view)
     this.renderTrick(view)
+    this.renderLastTrick(view)
     this.renderBanner()
     this.renderOverlay()
   }
 
+  // --- reactions ----------------------------------------------------------
+
+  private buildReactionBar(): HTMLElement {
+    const bar = el('div', { class: 'reaction-bar' })
+    for (const emoji of REACTIONS) {
+      const b = el('button', {
+        class: 'reaction-btn',
+        type: 'button',
+        'aria-label': `${t.sendReaction} ${emoji}`,
+        text: emoji,
+      })
+      b.addEventListener('click', () => this.sendReaction(emoji))
+      bar.appendChild(b)
+    }
+    return bar
+  }
+
+  private sendReaction(emoji: Reaction) {
+    const now = Date.now()
+    if (now - this.lastReactionAt < REACTION_COOLDOWN_MS) return
+    this.lastReactionAt = now
+    this.callbacks.onReact(emoji)
+    this.showReaction(emoji, 'mine')
+    this.reactionBar.classList.add('is-cooling')
+    setTimeout(() => this.reactionBar.classList.remove('is-cooling'), REACTION_COOLDOWN_MS)
+  }
+
+  /** Floats an emoji up from the relevant side of the table. */
+  showReaction(emoji: Reaction, from: 'mine' | 'theirs') {
+    const node = el('span', { class: `reaction reaction-${from}`, text: emoji })
+    // Jitter horizontally so a burst doesn't stack into one illegible pile.
+    node.style.setProperty('--drift', `${Math.round((Math.random() - 0.5) * 60)}px`)
+    this.reactionLayer.appendChild(node)
+    node.addEventListener('animationend', () => node.remove())
+  }
+
+  // --- board --------------------------------------------------------------
+
   private renderOpponentHand(view: PublicView) {
-    // Face-down cards have no identity to key on, so index is the key.
     const keys = Array.from({ length: view.opponentCards }, (_, i) => `back-${i}`)
     syncKeyed(this.opponentHand, keys, () => cardBack())
   }
@@ -153,7 +201,12 @@ export class TableView {
     syncKeyed(
       this.myHand,
       view.hand.map(c => c.id),
-      key => cardFace(parseCard(key as CardId), { playable: true }),
+      key =>
+        cardFace(parseCard(key as CardId), {
+          deck: this.deck,
+          playable: true,
+          trump: view.trumpSuit,
+        }),
       (node, _key, index) => {
         node.classList.toggle('is-disabled', !playable)
         node.toggleAttribute('disabled', !playable)
@@ -163,45 +216,102 @@ export class TableView {
     this.myHand.classList.toggle('hand-active', playable)
   }
 
+  /**
+   * The briscola sits beside the stock rather than tucked under it: it is the
+   * single most important fact on the table and it was previously half hidden
+   * behind the deck.
+   */
   private renderStock(view: PublicView) {
     clear(this.stock)
 
-    // stockLeft counts the face-up briscola, so the face-down pile is one less
-    // until the briscola has been taken.
     const faceDown = view.stockLeft - (view.trumpTaken ? 0 : 1)
 
-    if (!view.trumpTaken) {
-      this.stock.appendChild(el('div', { class: 'trump' }, cardFace(view.trumpCard)))
-    }
     if (faceDown > 0) {
+      this.stock.appendChild(el('div', { class: 'deck' }, cardBack()))
+    }
+
+    if (!view.trumpTaken) {
       this.stock.appendChild(
         el(
           'div',
-          { class: 'deck' },
-          cardBack(),
-          el('span', { class: 'deck-count', 'aria-label': t.cardsLeft(view.stockLeft) }, String(faceDown)),
+          { class: 'trump' },
+          cardFace(view.trumpCard, { deck: this.deck, trump: view.trumpSuit }),
+          el('span', { class: 'trump-label', text: t.briscola }),
         ),
       )
     }
-    this.stock.classList.toggle('stock-empty', view.stockLeft === 0)
+
+    // Turns left, not cards left: "how much game is there still to play" is
+    // what people actually want to know, and it keeps counting after the
+    // stock is empty.
+    this.stock.appendChild(
+      el(
+        'div',
+        { class: 'turns' },
+        el('span', { class: 'turns-value', text: String(view.tricksLeft) }),
+        el('span', { class: 'turns-label', text: t.turnsLeft(view.tricksLeft) }),
+      ),
+    )
   }
 
   private renderTrick(view: PublicView) {
     clear(this.trick)
     for (const played of view.table) {
       const isMine = played.seat === view.mySeat
-      const wrapper = el(
-        'div',
-        {
-          class: `played ${isMine ? 'played-mine' : 'played-theirs'}${
-            view.resolving && view.lastWinner === played.seat ? ' played-winner' : ''
-          }`,
-        },
-        cardFace(played.card),
+      this.trick.appendChild(
+        el(
+          'div',
+          {
+            class: `played ${isMine ? 'played-mine' : 'played-theirs'}${
+              view.resolving && view.lastWinner === played.seat ? ' played-winner' : ''
+            }`,
+          },
+          cardFace(played.card, { deck: this.deck, trump: view.trumpSuit }),
+        ),
       )
-      this.trick.appendChild(wrapper)
     }
     this.trick.classList.toggle('trick-resolving', view.resolving)
+  }
+
+  /** A small recap of the previous trick, so you can check what was played. */
+  private renderLastTrick(view: PublicView) {
+    const last = view.lastTrick
+    // Hide it while the current trick is still on the table, otherwise the
+    // same two cards appear twice and it reads as a bug.
+    if (!last || view.resolving || view.phase === 'over') {
+      this.lastTrickBox.hidden = true
+      clear(this.lastTrickBox)
+      return
+    }
+
+    clear(this.lastTrickBox)
+    this.lastTrickBox.hidden = false
+    this.lastTrickBox.appendChild(
+      el(
+        'div',
+        { class: `last-trick-inner ${last.iWon ? 'is-won' : 'is-lost'}` },
+        el('span', { class: 'last-trick-title', text: t.lastTrick }),
+        el(
+          'div',
+          { class: 'last-trick-cards' },
+          this.miniCard(last.theirs, t.opponent),
+          this.miniCard(last.mine, t.you),
+        ),
+        el('span', {
+          class: 'last-trick-result',
+          text: `${last.iWon ? t.wonTrick : t.lostTrick} · ${last.points}`,
+        }),
+      ),
+    )
+  }
+
+  private miniCard(card: Card, who: string): HTMLElement {
+    return el(
+      'div',
+      { class: 'mini' },
+      cardFace(card, { deck: this.deck }),
+      el('span', { class: 'mini-who', text: who }),
+    )
   }
 
   private renderBanner() {
@@ -219,33 +329,22 @@ export class TableView {
       return
     }
     const yourTurn = v.turn === v.mySeat
-    if (this.mode === 'hotseat') {
-      this.banner.textContent = yourTurn ? t.yourTurn : ''
-    } else {
-      this.banner.textContent = yourTurn ? t.yourTurn : t.opponentTurn
-    }
+    this.banner.textContent =
+      this.mode === 'hotseat' ? (yourTurn ? t.yourTurn : '') : yourTurn ? t.yourTurn : t.opponentTurn
     this.banner.classList.toggle('banner-active', yourTurn && !v.resolving)
   }
 
   private renderOverlay() {
     const v = this.view
 
-    if (this.status.kind === 'handoff') {
-      this.showOverlay(this.handoffPanel(this.status.seat))
-      return
-    }
-    if (this.status.kind === 'disconnected') {
-      this.showOverlay(this.disconnectedPanel())
-      return
-    }
-    if (this.status.kind === 'waiting') {
-      this.showOverlay(this.waitingPanel())
-      return
-    }
-    if (v && v.phase === 'over' && !v.resolving) {
-      this.showOverlay(this.resultPanel(v))
-      return
-    }
+    // Reactions only make sense when there is another browser to receive them.
+    this.reactionBar.hidden = this.mode !== 'online' || this.status.kind !== 'playing'
+
+    if (this.status.kind === 'handoff') return this.showOverlay(this.handoffPanel(this.status.seat))
+    if (this.status.kind === 'disconnected') return this.showOverlay(this.disconnectedPanel())
+    if (this.status.kind === 'waiting') return this.showOverlay(this.waitingPanel())
+    if (v && v.phase === 'over' && !v.resolving) return this.showOverlay(this.resultPanel(v))
+
     this.overlay.hidden = true
     clear(this.overlay)
   }
@@ -292,12 +391,16 @@ export class TableView {
     const theirs = view.opponentPoints
     const drew = mine === theirs
 
-    let heading: string
-    if (this.mode === 'hotseat') {
-      heading = drew ? t.draw : t.playerWins((mine > theirs ? view.mySeat : other(view.mySeat)) + 1)
-    } else {
-      heading = drew ? t.draw : mine > theirs ? t.youWin : t.youLose
-    }
+    const heading =
+      this.mode === 'hotseat'
+        ? drew
+          ? t.draw
+          : t.playerWins((mine > theirs ? view.mySeat : other(view.mySeat)) + 1)
+        : drew
+          ? t.draw
+          : mine > theirs
+            ? t.youWin
+            : t.youLose
 
     const { mine: mineLabel, theirs: theirsLabel } = this.labels(view)
     const outcomeClass = drew ? 'is-draw' : mine > theirs ? 'is-win' : 'is-loss'
@@ -335,4 +438,14 @@ export class TableView {
     b.addEventListener('click', onClick)
     return b
   }
+}
+
+/** Suit name plus its pip — used in the banner and settings preview. */
+export function suitChip(view: { trumpSuit: Card['suit'] }, deck: DeckId): HTMLElement {
+  return el(
+    'span',
+    { class: 'suit-chip' },
+    suitPip(view.trumpSuit, deck),
+    el('span', { text: suitName(view.trumpSuit, deck) }),
+  )
 }

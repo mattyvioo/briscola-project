@@ -2,6 +2,7 @@ import './ui/styles.css'
 
 import { freshDeck } from './game/deck'
 import { randomSeed } from './game/rng'
+import { loadSettings, saveSettings, type MatchSettings } from './game/settings'
 import { isValidRoomCode, makeRoomCode, normaliseRoomCode } from './net/protocol'
 import {
   AiSession,
@@ -12,7 +13,7 @@ import {
   type SessionStatus,
 } from './net/session'
 import { connect } from './net/trystero'
-import { preloadCards } from './ui/card'
+import { preloadDeck } from './ui/card'
 import { clear } from './ui/dom'
 import { lobbyScreen, menuScreen } from './ui/menu'
 import { TableView } from './ui/table'
@@ -21,6 +22,14 @@ const app = document.querySelector<HTMLElement>('#app')!
 
 let session: Session | null = null
 let table: TableView | null = null
+let settings: MatchSettings = loadSettings()
+
+function updateSettings(next: MatchSettings) {
+  settings = next
+  saveSettings(next)
+  // Warm the cache for the newly chosen artwork.
+  preloadDeck(freshDeck(), next.deck)
+}
 
 function teardown() {
   session?.leave()
@@ -39,12 +48,16 @@ function goHome() {
   teardown()
   history.replaceState(null, '', location.pathname)
   show(
-    menuScreen({
-      onHostOnline: hostOnline,
-      onJoinOnline: joinOnline,
-      onPlayAi: playAi,
-      onPlayHotseat: playHotseat,
-    }),
+    menuScreen(
+      {
+        onHostOnline: () => hostOnline(),
+        onJoinOnline: joinOnline,
+        onPlayAi: playAi,
+        onPlayHotseat: playHotseat,
+        onSettings: updateSettings,
+      },
+      settings,
+    ),
   )
 }
 
@@ -58,40 +71,49 @@ function startTable(
   session = next
   table = new TableView(
     mode,
+    settings.deck,
     {
       onPlay: card => next.play(card),
       onRematch: () => next.rematch(),
       onLeave: goHome,
       onHandoff: () => next.confirmHandoff(),
+      onReact: emoji => next.react(emoji),
     },
     roomCode,
   )
 
   next.onView(view => table?.update(view))
   next.onStatus((status: SessionStatus) => table?.setStatus(status))
+  next.onReaction(emoji => table?.showReaction(emoji, 'theirs'))
 
   show(table.root)
   onStarted()
 }
 
 function playAi() {
-  const s = new AiSession(randomSeed(), 0)
+  const s = new AiSession(randomSeed(), 0, settings)
   startTable(s, 'ai', null, () => s.start())
 }
 
 function playHotseat() {
-  const s = new HotseatSession(randomSeed(), 0)
+  const s = new HotseatSession(randomSeed(), 0, settings)
   startTable(s, 'hotseat', null, () => s.start())
 }
 
 /** `code` is supplied when the room was named up front by a #host= link. */
 function hostOnline(code: string = makeRoomCode()) {
   const transport = connect(code)
-  const s = new HostSession(transport, randomSeed())
+  const s = new HostSession(transport, randomSeed(), settings)
 
   // Show the lobby until the guest actually connects, so the host has
-  // somewhere to copy the code from.
-  show(lobbyScreen(code, goHome))
+  // somewhere to copy the code from — and can still adjust settings, which
+  // only take effect when the game is dealt.
+  show(
+    lobbyScreen(code, goHome, settings, next => {
+      updateSettings(next)
+      s.applySettings(next)
+    }),
+  )
   session = s
 
   transport.onPeerJoin(() => {
@@ -120,10 +142,6 @@ const HOST_HASH_PREFIX = '#host='
  *
  *   …/#ABC234        join an existing room  (send this one to your opponent)
  *   …/#host=ABC234   open that room as host (keep this one)
- *
- * Which means a room can be set up in advance and both links handed out at
- * once, rather than the host having to create a game and read the code off
- * the lobby screen first.
  */
 function roomFromUrl(): { role: 'host' | 'guest'; code: string } | null {
   const raw = location.hash.slice(1)
@@ -156,13 +174,12 @@ function route() {
     goHome()
     return
   }
-  // Drop any session already in flight before starting another one.
   teardown()
   if (room.role === 'host') hostOnline(room.code)
   else joinOnline(room.code)
 }
 
-preloadCards(freshDeck())
+preloadDeck(freshDeck(), settings.deck)
 
 window.addEventListener('hashchange', route)
 route()

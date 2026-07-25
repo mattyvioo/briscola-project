@@ -1,4 +1,7 @@
+import { DECK_IDS, deckStyle, type DeckId } from '../game/decks'
+import { DELAY_OPTIONS, type MatchSettings } from '../game/settings'
 import { isValidRoomCode, normaliseRoomCode, ROOM_CODE_LENGTH } from '../net/protocol'
+import { suitPip } from './card'
 import { el } from './dom'
 import { t } from './strings'
 
@@ -7,9 +10,102 @@ export interface MenuCallbacks {
   onJoinOnline(code: string): void
   onPlayAi(): void
   onPlayHotseat(): void
+  /** Fires whenever a setting changes, so it can be persisted immediately. */
+  onSettings(settings: MatchSettings): void
 }
 
-export function menuScreen(callbacks: MenuCallbacks): HTMLElement {
+/**
+ * Match settings.
+ *
+ * Pace is authoritative-side only — in an online game the host drives trick
+ * timing, so the guest's choice would have no effect and is hidden. Deck style
+ * is always shown because it is purely local presentation.
+ */
+export function settingsPanel(
+  settings: MatchSettings,
+  onChange: (next: MatchSettings) => void,
+  opts: { showPace: boolean } = { showPace: true },
+): HTMLElement {
+  let current = settings
+
+  const update = (patch: Partial<MatchSettings>) => {
+    current = { ...current, ...patch }
+    onChange(current)
+    render()
+  }
+
+  const paceRow = el('div', { class: 'setting-options' })
+  const deckRow = el('div', { class: 'setting-options' })
+
+  function render() {
+    paceRow.replaceChildren(
+      ...DELAY_OPTIONS.map(opt => {
+        const b = el(
+          'button',
+          {
+            class: `chip${opt.ms === current.trickDelayMs ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-pressed': opt.ms === current.trickDelayMs,
+          },
+          el('span', { class: 'chip-label', text: opt.label }),
+          el('span', { class: 'chip-hint', text: opt.hint }),
+        )
+        b.addEventListener('click', () => update({ trickDelayMs: opt.ms }))
+        return b
+      }),
+    )
+
+    deckRow.replaceChildren(
+      ...DECK_IDS.map((id: DeckId) => {
+        const style = deckStyle(id)
+        const pips = el('span', { class: 'chip-pips' })
+        for (const suit of ['denari', 'coppe', 'spade', 'bastoni'] as const) {
+          const p = suitPip(suit, id)
+          p.style.color = style.pipColor[suit]
+          pips.appendChild(p)
+        }
+        const b = el(
+          'button',
+          {
+            class: `chip chip-deck${id === current.deck ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-pressed': id === current.deck,
+          },
+          el('span', { class: 'chip-label', text: style.label }),
+          pips,
+        )
+        b.addEventListener('click', () => update({ deck: id }))
+        return b
+      }),
+    )
+  }
+
+  render()
+
+  return el(
+    'details',
+    { class: 'settings' },
+    el('summary', {}, el('span', { text: t.settings }), el('span', { class: 'muted small', text: t.settingsHint })),
+    opts.showPace
+      ? el(
+          'div',
+          { class: 'setting' },
+          el('span', { class: 'field-label', text: t.pace }),
+          el('span', { class: 'muted small', text: t.paceHint }),
+          paceRow,
+        )
+      : null,
+    el(
+      'div',
+      { class: 'setting' },
+      el('span', { class: 'field-label', text: t.cardStyle }),
+      el('span', { class: 'muted small', text: t.cardStyleHint }),
+      deckRow,
+    ),
+  )
+}
+
+export function menuScreen(callbacks: MenuCallbacks, settings: MatchSettings): HTMLElement {
   const root = el('div', { class: 'screen screen-menu' })
 
   const choice = (label: string, hint: string, onClick: () => void, variant = '') => {
@@ -40,6 +136,7 @@ export function menuScreen(callbacks: MenuCallbacks): HTMLElement {
       choice(t.playAi, t.playAiHint, () => callbacks.onPlayAi()),
       choice(t.playHotseat, t.playHotseatHint, () => callbacks.onPlayHotseat()),
     ),
+    settingsPanel(settings, next => callbacks.onSettings(next)),
     rulesCard(),
   )
 
@@ -95,7 +192,12 @@ function rulesCard(): HTMLElement {
 }
 
 /** Shown to the host while the guest is still connecting. */
-export function lobbyScreen(code: string, onLeave: () => void): HTMLElement {
+export function lobbyScreen(
+  code: string,
+  onLeave: () => void,
+  settings: MatchSettings,
+  onSettings: (next: MatchSettings) => void,
+): HTMLElement {
   const copy = el('button', { class: 'btn btn-ghost', type: 'button' }, t.copy)
   copy.addEventListener('click', async () => {
     try {
@@ -124,5 +226,8 @@ export function lobbyScreen(code: string, onLeave: () => void): HTMLElement {
       el('div', { class: 'spinner', 'aria-hidden': 'true' }),
       el('p', { class: 'muted small', text: t.waitingOpponent }),
     ),
+    // Still adjustable here: settings only bite when the game is dealt, which
+    // is the moment the opponent joins.
+    settingsPanel(settings, onSettings),
   )
 }

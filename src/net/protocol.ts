@@ -26,6 +26,18 @@ export interface PublicView {
   readonly myPoints: number
   readonly opponentPoints: number
   readonly trickNumber: number
+  /** Tricks still to play, including the one in progress. Counts down from 20. */
+  readonly tricksLeft: number
+  /**
+   * The previous trick, from this seat's point of view, so a player can check
+   * what was just played. Only ever the most recent one.
+   */
+  readonly lastTrick: {
+    readonly mine: Card
+    readonly theirs: Card
+    readonly iWon: boolean
+    readonly points: number
+  } | null
   readonly phase: 'playing' | 'over'
   /**
    * True while a completed trick is being shown before it is swept up. The UI
@@ -43,16 +55,30 @@ export interface TrickSummary {
   readonly points: number
 }
 
+/**
+ * Emoji you can throw at your opponent. A fixed set rather than free text:
+ * it keeps the wire format trivial to validate and means nobody can send
+ * arbitrary strings into the other player's DOM.
+ */
+export const REACTIONS = ['👏', '😂', '😱', '🤔', '😎', '🔥', '😭', '🍀'] as const
+export type Reaction = (typeof REACTIONS)[number]
+
+export function isReaction(value: unknown): value is Reaction {
+  return typeof value === 'string' && (REACTIONS as readonly string[]).includes(value)
+}
+
 /** Guest → host. The guest only ever expresses intent. */
 export type ClientMsg =
   | { readonly t: 'hello' }
   | { readonly t: 'play'; readonly card: CardId }
   | { readonly t: 'rematch' }
+  | { readonly t: 'react'; readonly emoji: Reaction }
 
 /** Host → guest. The host is authoritative. */
 export type HostMsg =
   | { readonly t: 'view'; readonly view: PublicView }
   | { readonly t: 'trick'; readonly trick: TrickSummary }
+  | { readonly t: 'react'; readonly emoji: Reaction }
   | { readonly t: 'error'; readonly message: string }
 
 export type NetMsg = ClientMsg | HostMsg

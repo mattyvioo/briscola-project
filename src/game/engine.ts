@@ -25,14 +25,19 @@ export interface GameState {
   readonly piles: readonly [readonly Card[], readonly Card[]]
   readonly trickNumber: number
   readonly phase: 'playing' | 'over'
+  /** The trick just completed, kept so players can review what was played. */
+  readonly lastTrick: CompletedTrick | null
 }
 
-export interface TrickResult {
+export interface CompletedTrick {
   readonly leader: Seat
   readonly leadCard: Card
   readonly followCard: Card
   readonly winner: Seat
   readonly points: number
+}
+
+export interface TrickResult extends CompletedTrick {
   /** What each seat drew afterwards, in draw order (winner first). */
   readonly drawn: readonly { seat: Seat; card: Card }[]
 }
@@ -73,7 +78,16 @@ export function newGame(seed: number, dealer: Seat = 0): GameState {
     piles: [[], []],
     trickNumber: 1,
     phase: 'playing',
+    lastTrick: null,
   }
+}
+
+/** Tricks still to be played, counting the one in progress. A game has 20. */
+export const TRICKS_PER_GAME = 20
+
+export function tricksLeft(state: GameState): number {
+  if (state.phase === 'over') return 0
+  return TRICKS_PER_GAME - state.trickNumber + 1
 }
 
 export function legalMoves(state: GameState, seat: Seat): readonly Card[] {
@@ -137,6 +151,14 @@ export function play(state: GameState, seat: Seat, id: CardId): PlayResult {
 
   const over = hands[0].length === 0 && hands[1].length === 0
 
+  const completed: CompletedTrick = {
+    leader,
+    leadCard,
+    followCard: card,
+    winner,
+    points: totalPoints([leadCard, card]),
+  }
+
   return {
     state: {
       ...state,
@@ -148,15 +170,9 @@ export function play(state: GameState, seat: Seat, id: CardId): PlayResult {
       turn: winner,
       trickNumber: state.trickNumber + 1,
       phase: over ? 'over' : 'playing',
+      lastTrick: completed,
     },
-    trick: {
-      leader,
-      leadCard,
-      followCard: card,
-      winner,
-      points: totalPoints([leadCard, card]),
-      drawn,
-    },
+    trick: { ...completed, drawn },
   }
 }
 

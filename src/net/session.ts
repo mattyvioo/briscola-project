@@ -1,13 +1,12 @@
 import { chooseCard } from '../game/ai'
 import type { CardId } from '../game/deck'
-import { cardsLeftToDraw, newGame, play, score, type GameState } from '../game/engine'
+import { cardsLeftToDraw, newGame, play, score, tricksLeft, type GameState } from '../game/engine'
 import { other, type Seat } from '../game/rules'
 import { randomSeed } from '../game/rng'
-import type { ClientMsg, HostMsg, NetMsg, PublicView, TrickSummary } from './protocol'
+import { DEFAULT_SETTINGS, type MatchSettings } from '../game/settings'
+import { isReaction, type ClientMsg, type HostMsg, type NetMsg, type PublicView, type Reaction, type TrickSummary } from './protocol'
 import type { Transport } from './transport'
 
-/** How long a completed trick stays face-up before it is swept away. */
-export const TRICK_PAUSE_MS = 1400
 /** A beat before the AI answers, so it doesn't feel instantaneous. */
 export const AI_THINK_MS = 650
 
@@ -22,8 +21,12 @@ export interface Session {
   readonly mode: 'online' | 'ai' | 'hotseat'
   onView(handler: (view: PublicView) => void): void
   onStatus(handler: (status: SessionStatus) => void): void
+  /** Fires when the *opponent* sends a reaction. Online only. */
+  onReaction(handler: (emoji: Reaction) => void): void
   play(card: CardId): void
   rematch(): void
+  /** Send a reaction to the opponent. No-op offline. */
+  react(emoji: Reaction): void
   /** Hotseat only: the next player has picked up the device. */
   confirmHandoff(): void
   leave(): void
@@ -48,9 +51,24 @@ function viewFor(
     myPoints: score(state, seat),
     opponentPoints: score(state, other(seat)),
     trickNumber: state.trickNumber,
+    tricksLeft: tricksLeft(state),
+    lastTrick: lastTrickFor(state, seat),
     phase: state.phase,
     resolving: opts.resolving ?? false,
     lastWinner: opts.lastWinner ?? null,
+  }
+}
+
+/** Re-frames the last trick from one seat's point of view. */
+function lastTrickFor(state: GameState, seat: Seat): PublicView['lastTrick'] {
+  const t = state.lastTrick
+  if (!t) return null
+  const mineIsLead = t.leader === seat
+  return {
+    mine: mineIsLead ? t.leadCard : t.followCard,
+    theirs: mineIsLead ? t.followCard : t.leadCard,
+    iWon: t.winner === seat,
+    points: t.points,
   }
 }
 
@@ -60,6 +78,7 @@ abstract class BaseSession implements Session {
 
   protected viewHandlers: ((view: PublicView) => void)[] = []
   protected statusHandlers: ((status: SessionStatus) => void)[] = []
+  protected reactionHandlers: ((emoji: Reaction) => void)[] = []
   protected timers = new Set<ReturnType<typeof setTimeout>>()
 
   onView(handler: (view: PublicView) => void) {
@@ -70,12 +89,24 @@ abstract class BaseSession implements Session {
     this.statusHandlers.push(handler)
   }
 
+  onReaction(handler: (emoji: Reaction) => void) {
+    this.reactionHandlers.push(handler)
+  }
+
   protected emit(view: PublicView) {
     for (const h of this.viewHandlers) h(view)
   }
 
   protected status(status: SessionStatus) {
     for (const h of this.statusHandlers) h(status)
+  }
+
+  protected emitReaction(emoji: Reaction) {
+    for (const h of this.reactionHandlers) h(emoji)
+  }
+
+  react(_emoji: Reaction) {
+    // Only meaningful when there is another browser to send to.
   }
 
   /** setTimeout that gets cleaned up on leave(), so a torn-down session goes quiet. */
@@ -99,6 +130,7 @@ abstract class BaseSession implements Session {
     this.timers.clear()
     this.viewHandlers = []
     this.statusHandlers = []
+    this.reactionHandlers = []
   }
 }
 
@@ -110,11 +142,21 @@ abstract class BaseSession implements Session {
 abstract class AuthoritativeSession extends BaseSession {
   protected state: GameState
   private dealer: Seat
+  protected settings: MatchSettings
 
-  constructor(seed: number, dealer: Seat = 0) {
+  constructor(seed: number, dealer: Seat = 0, settings: MatchSettings = DEFAULT_SETTINGS) {
     super()
     this.dealer = dealer
+    this.settings = settings
     this.state = newGame(seed, dealer)
+  }
+
+  /**
+   * Change the pace mid-lobby. Only the authoritative side has any say: it
+   * runs the timer that holds a finished trick on the table.
+   */
+  applySettings(next: MatchSettings) {
+    this.settings = next
   }
 
   /** Push the current state out to whoever needs to see it. */
@@ -154,7 +196,7 @@ abstract class AuthoritativeSession extends BaseSession {
     this.later(() => {
       this.broadcast()
       if (this.state.phase === 'playing') this.afterTrick()
-    }, TRICK_PAUSE_MS)
+    }, this.settings.trickDelayMs)
 
     return true
   }
@@ -281,8 +323,8 @@ export class HostSession extends AuthoritativeSession {
   private static readonly HOST: Seat = 0
   private static readonly GUEST: Seat = 1
 
-  constructor(private transport: Transport, seed: number) {
-    super(seed, 0)
+  constructor(private transport: Transport, seed: number, settings?: MatchSettings) {
+    super(seed, 0, settings)
 
     transport.onMessage(msg => this.receive(msg))
     transport.onPeerJoin(() => {
@@ -330,7 +372,16 @@ export class HostSession extends AuthoritativeSession {
       case 'rematch':
         this.rematch()
         break
+      case 'react':
+        // Validate rather than trusting the peer — this string ends up in the
+        // UI, and the allowed set is small and fixed.
+        if (isReaction(m.emoji)) this.emitReaction(m.emoji)
+        break
     }
+  }
+
+  override react(emoji: Reaction) {
+    this.send({ t: 'react', emoji })
   }
 
   private send(msg: HostMsg) {
@@ -358,6 +409,8 @@ export class GuestSession extends BaseSession {
       if (m.t === 'view') {
         this.status({ kind: 'playing' })
         this.emit(m.view)
+      } else if (m.t === 'react' && isReaction(m.emoji)) {
+        this.emitReaction(m.emoji)
       }
     })
 
@@ -381,6 +434,10 @@ export class GuestSession extends BaseSession {
 
   rematch() {
     this.transport.send({ t: 'rematch' } satisfies ClientMsg)
+  }
+
+  override react(emoji: Reaction) {
+    this.transport.send({ t: 'react', emoji } satisfies ClientMsg)
   }
 
   override leave() {

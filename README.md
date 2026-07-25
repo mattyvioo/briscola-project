@@ -19,6 +19,35 @@ npm run dev
 
 Tap or click a card to play it. On desktop, `1` / `2` / `3` play the cards in hand.
 
+### Settings
+
+Available from the main menu and from the lobby while you wait for an opponent.
+
+- **Ritmo di gioco** — how long a finished trick stays face-up before it is
+  swept away (0.8s / 1.4s / 2.5s / 4s), so you get time to see what the other
+  player put down. In an online game the **host's** choice governs: the host
+  owns the state and runs that timer, so a guest setting would only
+  desynchronise the two boards.
+- **Mazzo di carte** — Neapolitan or French artwork. This one is *per player*:
+  it is pure presentation, so you and your opponent can each use whichever pack
+  you prefer in the same game.
+
+Both persist to `localStorage`.
+
+### On the table
+
+- Cards of the trump suit carry a **pip badge** in the corner. Briscola gives no
+  visual cue for this normally — you are expected to remember the suit — and at
+  60px on a phone that is a hard read.
+- The **briscola sits beside the deck**, fully visible, rather than tucked
+  underneath it.
+- The counter next to the deck shows **tricks remaining**, not cards remaining.
+- The **previous trick** stays on screen (your card vs theirs, and who took it).
+  Only the most recent one.
+- **Emoji reactions** (online only): tap one to float it across both screens.
+  Rate-limited to one every 1.5s, and the set is fixed — the receiving side
+  validates against it rather than rendering arbitrary strings.
+
 ### After a game
 
 The result screen offers **Rivincita** and **Esci**.
@@ -129,10 +158,25 @@ accounted for.
 
 ## Card artwork
 
-Public domain, from the Wikimedia Commons
-[Naples deck](https://commons.wikimedia.org/wiki/Category:Naples_deck) category.
-See [`public/cards/CREDITS.md`](public/cards/CREDITS.md). The images are
-committed, so a build never hits the network; `npm run assets` regenerates them.
+Two packs ship, both free:
+
+| Pack | Source | Licence |
+|---|---|---|
+| `napoletane` | Commons [Naples deck](https://commons.wikimedia.org/wiki/Category:Naples_deck) | **Public domain** |
+| `francesi` | Commons [English pattern deck.svg](https://commons.wikimedia.org/wiki/File:English_pattern_playing_cards_deck.svg) | **CC0** |
+
+The French pack is one CC0 sheet holding a 13x4 grid; `scripts/fetch-cards.mjs`
+slices the 40 cards Briscola needs out of it and masks the rounded corners.
+
+A third pack, `bergamasche` (Commons [Bergamo deck](https://commons.wikimedia.org/wiki/Category:Bergamo_deck),
+CC BY-SA 3.0 by *Poulpy*), is implemented in the fetch script but **not
+shipped**: it is 40 separate downloads and reliably trips Commons' rate
+limiter. Run `npm run assets` until `public/cards/bergamasche` holds all 40,
+then add `'bergamasche'` back to `DECK_IDS` in
+[`src/game/decks.ts`](src/game/decks.ts).
+
+See [`public/cards/CREDITS.md`](public/cards/CREDITS.md). Images are committed,
+so a build never hits the network.
 
 ## Deploying
 

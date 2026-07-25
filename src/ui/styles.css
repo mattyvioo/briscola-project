@@ -237,19 +237,84 @@ body {
   outline-offset: 1px;
 }
 
-.rules {
+.rules,
+.settings {
   background: #ffffff0a;
   border: 1px solid #ffffff1a;
   border-radius: var(--radius);
   padding: 0.7rem 1.1rem;
   font-size: 0.85rem;
 }
-.rules summary {
+.rules summary,
+.settings summary {
   cursor: pointer;
   font-weight: 600;
   min-height: 28px;
   display: flex;
   align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+/* Settings ---------------------------------------------------------------- */
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.8rem;
+}
+.setting-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+.chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-height: 44px;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius);
+  background: #ffffff12;
+  border: 1px solid #ffffff26;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.chip.is-selected {
+  background: var(--gold);
+  color: #241a05;
+  border-color: transparent;
+}
+.chip.is-selected .chip-hint {
+  color: #241a05b8;
+}
+.chip-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.chip-hint {
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+.chip-pips {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.chip-pips .pip {
+  width: 13px;
+  height: 13px;
+}
+.chip-pips .pip-text {
+  width: auto;
+  height: auto;
+  font-size: 13px;
+}
+/* On the gold selected chip, the deck's own pip colours would vanish. */
+.chip.is-selected .chip-pips .pip {
+  color: #241a05 !important;
 }
 .rules ul {
   margin: 0.6rem 0 0.2rem;
@@ -299,9 +364,10 @@ body {
   position: relative;
   height: 100dvh;
   /* The board row is the only flexible one; everything else is content-sized,
-     so the hand never gets pushed off the bottom of a short viewport. */
+     so the hand never gets pushed off the bottom of a short viewport.
+     Rows: hud, opponent hand, board, banner, own hand, reaction bar. */
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   gap: var(--gap);
   padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
     max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
@@ -433,55 +499,104 @@ body {
   align-items: center;
   gap: var(--gap);
   min-height: 0;
+  position: relative;
 }
 
+/* The briscola sits *beside* the deck rather than crosswise underneath it.
+   It is the single most important card on the table and half of it used to be
+   hidden behind the stock. */
 .stock {
-  position: relative;
   display: flex;
   align-items: center;
-  /* The trump card lies crosswise, so this column is as wide as a card is tall. */
-  width: calc(var(--card-w) / (var(--card-ratio)));
-  height: calc(var(--card-w) / (var(--card-ratio)));
-  justify-content: center;
-}
-.stock-empty {
-  width: 0;
-}
-
-/* Both the crosswise briscola and the deck sit dead-centre in .stock, whose
-   box is exactly one card-height square. Centring on the box (rather than
-   offsetting from its left edge) is what keeps the rotated trump from hanging
-   off the side of the screen on narrow viewports. */
-.trump,
-.deck {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-}
-.trump {
-  transform: translate(-50%, -50%) rotate(90deg);
-}
-.trump .card {
-  box-shadow: 0 3px 8px #00000073;
+  gap: calc(var(--gap) * 0.5);
 }
 
 .deck {
-  transform: translate(-50%, -50%);
+  flex: none;
   filter: drop-shadow(0 3px 6px #00000073);
 }
-.deck-count {
-  position: absolute;
-  right: -6px;
-  bottom: -6px;
-  min-width: 22px;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: var(--gold);
-  color: #241a05;
-  font-size: 0.72rem;
+
+.trump {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.trump .card {
+  box-shadow: 0 0 0 2px var(--gold), 0 3px 10px #00000080;
+}
+.trump-label {
+  font-size: 0.6rem;
   font-weight: 700;
-  text-align: center;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+/* Turns remaining, not cards remaining — "how much game is left" is the
+   question people actually have, and it keeps counting once the stock dries up. */
+.turns {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.05;
+  padding-left: 2px;
+}
+.turns-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--gold);
   font-variant-numeric: tabular-nums;
+}
+.turns-label {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-muted);
+}
+
+/* Briscola marker on individual cards ------------------------------------- */
+
+.card-trump .card-img {
+  /* Nudge trumps visually so they read as a set even in a fanned hand. */
+  filter: saturate(1.05);
+}
+
+.trump-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(var(--card-w) * 0.3);
+  height: calc(var(--card-w) * 0.3);
+  min-width: 13px;
+  min-height: 13px;
+  border-radius: 50%;
+  background: #fffffff2;
+  box-shadow: 0 0 0 1.5px var(--gold), 0 1px 3px #00000059;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pip, #333);
+  pointer-events: none;
+  z-index: 2;
+}
+.pip {
+  width: 68%;
+  height: 68%;
+  display: block;
+}
+.pip-text {
+  width: auto;
+  height: auto;
+  font-size: calc(var(--card-w) * 0.19);
+  line-height: 1;
+  font-weight: 700;
+}
+.card {
+  position: relative; /* anchor for .trump-badge */
 }
 
 .trick {
@@ -525,6 +640,140 @@ body {
 }
 .banner-active {
   color: var(--gold);
+}
+
+/* Previous trick ---------------------------------------------------------- */
+
+/* Parked in the board's top-right corner: visible without competing with the
+   live trick for the centre of the table. */
+.last-trick {
+  position: absolute;
+  top: 0;
+  right: 0;
+  --mini-w: calc(var(--card-w) * 0.42);
+}
+.last-trick[hidden] {
+  display: none;
+}
+.last-trick-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 7px;
+  border-radius: 9px;
+  background: #00000047;
+  border: 1px solid #ffffff1a;
+}
+.last-trick-title {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-muted);
+}
+.last-trick-cards {
+  display: flex;
+  gap: 4px;
+}
+.mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.mini .card {
+  width: var(--mini-w);
+  border-radius: 3px;
+  box-shadow: 0 1px 3px #00000059;
+}
+/* The trump badge would be an illegible dot at this size. */
+.mini .trump-badge {
+  display: none;
+}
+.mini-who {
+  font-size: 0.5rem;
+  color: var(--ink-muted);
+}
+.last-trick-result {
+  font-size: 0.55rem;
+  font-weight: 700;
+}
+.is-won .last-trick-result {
+  color: var(--gold);
+}
+.is-lost .last-trick-result {
+  color: var(--ink-muted);
+}
+
+/* Emoji reactions --------------------------------------------------------- */
+
+.reaction-bar {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.reaction-bar[hidden] {
+  display: none;
+}
+.reaction-bar.is-cooling {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.reaction-btn {
+  min-width: 34px;
+  min-height: 34px;
+  font-size: 1.05rem;
+  line-height: 1;
+  border-radius: 999px;
+  background: #ffffff12;
+  border: 1px solid #ffffff1a;
+  transition: transform 0.12s ease, background-color 0.15s ease;
+}
+.reaction-btn:active {
+  transform: scale(0.9);
+}
+@media (hover: hover) {
+  .reaction-btn:hover {
+    background: #ffffff26;
+  }
+}
+
+/* Floating layer for emoji that have been sent. Non-interactive so it can sit
+   over the board without eating taps. */
+.reaction-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 8;
+}
+.reaction {
+  position: absolute;
+  left: 50%;
+  font-size: clamp(1.8rem, 8vw, 3rem);
+  animation: float-up 2s ease-out forwards;
+  will-change: transform, opacity;
+}
+.reaction-mine {
+  bottom: 22%;
+}
+.reaction-theirs {
+  top: 22%;
+}
+@keyframes float-up {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.5);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--drift, 0px)), -18px) scale(1.15);
+  }
+  to {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--drift, 0px)), -90px) scale(1);
+  }
 }
 
 /* Overlays ---------------------------------------------------------------- */

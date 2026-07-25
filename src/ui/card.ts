@@ -1,23 +1,81 @@
-import { CARD_BACK_IMAGE, cardImage, cardName, parseCard, type Card, type CardId } from '../game/deck'
+import { parseCard, type Card, type CardId, type Suit } from '../game/deck'
+import { CARD_BACK_IMAGE, cardImage, cardName, deckStyle, type DeckId } from '../game/decks'
 import { el } from './dom'
 
-/** A face-up card. Rendered as a button when the player can actually play it. */
-export function cardFace(card: Card, opts: { playable?: boolean } = {}): HTMLElement {
-  const img = el('img', {
-    class: 'card-img',
-    src: cardImage(card),
-    alt: cardName(card),
-    draggable: false,
-    loading: 'eager',
-  })
-
-  if (opts.playable) {
-    return el('button', { class: 'card card-playable', type: 'button', 'data-card': card.id }, img)
-  }
-  return el('div', { class: 'card', 'data-card': card.id, role: 'img', 'aria-label': cardName(card) }, img)
+export interface CardOptions {
+  readonly deck: DeckId
+  readonly playable?: boolean
+  /** Trump suit, so cards belonging to it can be badged. */
+  readonly trump?: Suit | null
 }
 
-export function cardFaceById(id: CardId, opts: { playable?: boolean } = {}): HTMLElement {
+/**
+ * A face-up card. Rendered as a button when the player can actually play it.
+ *
+ * Cards of the trump suit get a small pip badge in the corner. Briscola gives
+ * no visual cue that a card is trump — you are expected to remember the suit —
+ * and on a phone, at 60px wide, that is a genuinely hard read.
+ */
+export function cardFace(card: Card, opts: CardOptions): HTMLElement {
+  const children: HTMLElement[] = [
+    el('img', {
+      class: 'card-img',
+      src: cardImage(card, opts.deck),
+      alt: cardName(card, opts.deck),
+      draggable: false,
+    }),
+  ]
+
+  const isTrump = opts.trump != null && card.suit === opts.trump
+  if (isTrump) children.push(trumpBadge(card.suit, opts.deck))
+
+  const cls = `card${isTrump ? ' card-trump' : ''}`
+
+  if (opts.playable) {
+    return el(
+      'button',
+      { class: `${cls} card-playable`, type: 'button', 'data-card': card.id },
+      ...children,
+    )
+  }
+  return el(
+    'div',
+    { class: cls, 'data-card': card.id, role: 'img', 'aria-label': cardName(card, opts.deck) },
+    ...children,
+  )
+}
+
+/** The little corner marker showing "this one is briscola". */
+export function trumpBadge(suit: Suit, deck: DeckId): HTMLElement {
+  const style = deckStyle(deck)
+  const badge = el('span', { class: 'trump-badge', 'aria-hidden': 'true' })
+  badge.style.setProperty('--pip', style.pipColor[suit])
+  badge.appendChild(suitPip(suit, deck))
+  return badge
+}
+
+/** The suit glyph on its own — used by the badge and the settings preview. */
+export function suitPip(suit: Suit, deck: DeckId): HTMLElement {
+  const style = deckStyle(deck)
+
+  if (style.pipKind === 'text') {
+    return el('span', { class: 'pip pip-text', text: style.pip[suit] })
+  }
+
+  // Built via the SVG namespace; el() creates HTML elements, which would not
+  // render as SVG.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('class', 'pip pip-svg')
+  svg.setAttribute('aria-hidden', 'true')
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+  path.setAttribute('d', style.pip[suit])
+  path.setAttribute('fill', 'currentColor')
+  svg.appendChild(path)
+  return svg as unknown as HTMLElement
+}
+
+export function cardFaceById(id: CardId, opts: CardOptions): HTMLElement {
   return cardFace(parseCard(id), opts)
 }
 
@@ -31,13 +89,13 @@ export function cardBack(): HTMLElement {
 }
 
 /**
- * Preloads every card image at startup. The deck is ~1.7 MB total, and having
- * it in cache avoids a blank frame when a card is drawn mid-game.
+ * Preloads a deck's images. Only the selected style is fetched — pulling all
+ * three would be several megabytes for artwork the player never sees.
  */
-export function preloadCards(cards: readonly Card[]) {
+export function preloadDeck(cards: readonly Card[], deck: DeckId) {
   for (const card of cards) {
     const img = new Image()
-    img.src = cardImage(card)
+    img.src = cardImage(card, deck)
   }
   new Image().src = CARD_BACK_IMAGE
 }

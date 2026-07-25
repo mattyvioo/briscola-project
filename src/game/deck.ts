@@ -86,27 +86,6 @@ export function totalPoints(cards: readonly Card[]): number {
   return cards.reduce((sum, c) => sum + POINTS[c.rank], 0)
 }
 
-/** Italian display name, e.g. "Asso di denari", "Cavallo di spade". */
-const RANK_NAMES: Readonly<Record<Rank, string>> = {
-  1: 'Asso',
-  2: 'Due',
-  3: 'Tre',
-  4: 'Quattro',
-  5: 'Cinque',
-  6: 'Sei',
-  7: 'Sette',
-  8: 'Fante',
-  9: 'Cavallo',
-  10: 'Re',
-}
-
-export function cardName(card: Card): string {
-  return `${RANK_NAMES[card.rank]} di ${card.suit}`
-}
-
-/** Path to the card face image, relative to the site root. */
-export function cardImage(card: Card): string {
-  return `cards/${card.suit}-${card.rank}.webp`
-}
-
-export const CARD_BACK_IMAGE = 'cards/back.webp'
+// Display concerns — card names, artwork paths, suit pips — depend on the
+// chosen deck style and live in ./decks.ts. This module stays purely about the
+// rules.
