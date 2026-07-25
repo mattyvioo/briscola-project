@@ -28,7 +28,17 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: |
+          echo "node $(node -v) / npm $(npm -v)"
+          # npm writes the real failure reason to its debug log rather than
+          # stdout, so surface it here instead of leaving a bare exit code.
+          npm ci --no-audit --no-fund || {
+            echo "::group::npm debug log"
+            tail -n 150 "$(npm config get cache)"/_logs/*.log 2>/dev/null || echo "(no debug log written)"
+            echo "::endgroup::"
+            exit 1
+          }
 
       # Cheap (<1s) and catches a broken rules engine before it ships.
       - run: npm test
