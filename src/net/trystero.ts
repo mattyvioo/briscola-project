@@ -1,7 +1,7 @@
 import { joinRoom } from '@trystero-p2p/mqtt'
 import type { JsonValue } from '@trystero-p2p/mqtt'
 import type { NetMsg } from './protocol'
-import type { Transport } from './transport'
+import type { PeerId, Transport } from './transport'
 
 /**
  * Trystero over public MQTT relays — upstream rates MQTT as the most robust of
@@ -24,32 +24,32 @@ export function connect(roomCode: string): Transport {
   // rather than loosening the protocol types everywhere else.
   const action = room.makeAction<JsonValue>(ACTION)
 
-  let connected = false
-  const messageHandlers: ((msg: NetMsg) => void)[] = []
-  const joinHandlers: (() => void)[] = []
-  const leaveHandlers: (() => void)[] = []
+  const messageHandlers: ((msg: NetMsg, from: PeerId) => void)[] = []
+  const joinHandlers: ((peer: PeerId) => void)[] = []
+  const leaveHandlers: ((peer: PeerId) => void)[] = []
 
-  action.onMessage = data => {
+  action.onMessage = (data, context) => {
     const msg = data as NetMsg
-    for (const h of messageHandlers) h(msg)
+    for (const h of messageHandlers) h(msg, context.peerId)
   }
 
-  room.onPeerJoin = () => {
-    connected = true
-    for (const h of joinHandlers) h()
+  room.onPeerJoin = peerId => {
+    for (const h of joinHandlers) h(peerId)
   }
 
-  room.onPeerLeave = () => {
-    connected = Object.keys(room.getPeers()).length > 0
-    for (const h of leaveHandlers) h()
+  room.onPeerLeave = peerId => {
+    for (const h of leaveHandlers) h(peerId)
   }
+
+  const peers = () => Object.keys(room.getPeers())
 
   return {
-    send(msg) {
-      // Broadcasts to every peer in the room — in a 1v1 game, the opponent.
+    send(msg, target) {
       // A send can reject if the channel closed mid-flight; that is a dropped
       // peer, which onPeerLeave already reports, so swallow it here.
-      void action.send(msg as unknown as JsonValue).catch(() => {})
+      void action
+        .send(msg as unknown as JsonValue, target ? { target } : undefined)
+        .catch(() => {})
     },
     onMessage(handler) {
       messageHandlers.push(handler)
@@ -60,8 +60,9 @@ export function connect(roomCode: string): Transport {
     onPeerLeave(handler) {
       leaveHandlers.push(handler)
     },
+    peers,
     isConnected() {
-      return connected
+      return peers().length > 0
     },
     leave() {
       void room.leave()

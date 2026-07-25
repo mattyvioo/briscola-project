@@ -26,7 +26,8 @@ import {
   type Reaction,
   type TrickSummary,
 } from './protocol'
-import type { Transport } from './transport'
+import { clientId, isClientId } from './identity'
+import type { PeerId, Transport } from './transport'
 
 /** A beat before an AI seat answers, so it doesn't feel instantaneous. */
 export const AI_THINK_MS = 650
@@ -58,6 +59,8 @@ export type SessionStatus =
   /** Hotseat only: hide the board until the next player picks the device up. */
   | { kind: 'handoff'; seat: Seat }
   | { kind: 'disconnected' }
+  /** The room already has all its players. */
+  | { kind: 'full' }
 
 export interface Session {
   readonly mode: SessionMode
@@ -384,18 +387,38 @@ export class HostSession extends GameSession {
     private transport: Transport,
     seed: number = randomSeed(),
     settings: MatchSettings = DEFAULT_SETTINGS,
-    seats: SeatConfig[] = [{ control: 'local' }, { control: 'remote' }],
+    seats?: SeatConfig[],
   ) {
-    super(seats, seed, settings, 0)
+    super(seats ?? defaultOnlineSeats(settings), seed, settings, 0)
 
-    transport.onMessage(msg => this.receive(msg))
+    transport.onMessage((msg, from) => this.receive(msg, from))
     transport.onPeerJoin(() => {
+      // Nothing is sent until the peer says hello: only then is it known
+      // which seat — and therefore which hand — belongs to them.
       this.status({ kind: 'playing' })
-      this.broadcast()
     })
-    transport.onPeerLeave(() => {
-      if (!transport.isConnected()) this.status({ kind: 'disconnected' })
-    })
+    transport.onPeerLeave(peer => this.onPeerLeave(peer))
+  }
+
+  /** Seats a joining browser, restoring its old seat if it has one. */
+  private seatFor(client: string, peer: PeerId): Seat | null {
+    const known = this.seats.findIndex(s => s.clientId === client)
+    if (known !== -1) {
+      this.seats[known]!.peerId = peer
+      this.seats[known]!.control = 'remote'
+      return known
+    }
+
+    const free = this.seats.findIndex(s => s.control === 'remote' && !s.clientId)
+    if (free === -1) return null
+    this.seats[free] = { control: 'remote', clientId: client, peerId: peer }
+    return free
+  }
+
+  private onPeerLeave(peer: PeerId) {
+    const seat = this.seats.findIndex(s => s.peerId === peer)
+    if (seat !== -1) delete this.seats[seat]!.peerId
+    if (!this.transport.isConnected()) this.status({ kind: 'disconnected' })
   }
 
   override start() {
@@ -406,11 +429,15 @@ export class HostSession extends GameSession {
 
   protected override broadcast(opts?: ViewOpts) {
     this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, opts))
-    // Every remote seat gets its own view. Phase 4 targets these per peer;
-    // with a single remote seat a broadcast reaches exactly the right browser.
+    // Each remote seat gets its own view, addressed to its own peer. These
+    // carry that seat's hand, so a broadcast would deal everyone's cards face
+    // up at a three or four player table.
     this.seats.forEach((seat, i) => {
-      if (seat.control !== 'remote') return
-      this.send({ t: 'view', view: viewFor(this.state, i, this.settings.deck, this.match, opts) })
+      if (seat.control !== 'remote' || !seat.peerId) return
+      this.send(
+        { t: 'view', view: viewFor(this.state, i, this.settings.deck, this.match, opts) },
+        seat.peerId,
+      )
     })
   }
 
@@ -418,17 +445,25 @@ export class HostSession extends GameSession {
     this.send({ t: 'trick', trick })
   }
 
-  private receive(msg: NetMsg) {
+  private receive(msg: NetMsg, from: PeerId) {
     const m = msg as ClientMsg
     switch (m.t) {
-      case 'hello':
-        // The guest is ready to render; re-send state. Also covers a reconnect.
+      case 'hello': {
+        if (!isClientId(m.clientId)) return
+        const seat = this.seatFor(m.clientId, from)
+        if (seat === null) {
+          this.send({ t: 'full' }, from)
+          return
+        }
+        this.send({ t: 'seated', seat, players: this.seats.length }, from)
         this.broadcast()
+        this.advance()
         break
+      }
       case 'play': {
-        const seat = this.remoteSeatToMove()
+        const seat = this.seatOf(from)
         if (seat === null || !this.applyMove(seat, m.card)) {
-          this.send({ t: 'error', message: 'Mossa non valida' })
+          this.send({ t: 'error', message: 'Mossa non valida' }, from)
           this.broadcast()
         }
         break
@@ -453,15 +488,15 @@ export class HostSession extends GameSession {
   }
 
   /**
-   * Which seat a `play` from the wire belongs to.
+   * Which seat a message came from.
    *
-   * With one remote seat this is unambiguous: it can only be a move for the
-   * seat whose turn it is, and only if that seat is remote. Phase 4 replaces
-   * this with a peer-id lookup once several remotes can be connected at once.
+   * Looked up by peer rather than inferred from whose turn it is: with more
+   * than one remote player, "it is somebody's turn" says nothing about who
+   * actually sent the packet.
    */
-  private remoteSeatToMove(): Seat | null {
-    const seat = this.state.turn
-    return this.seats[seat]?.control === 'remote' ? seat : null
+  private seatOf(peer: PeerId): Seat | null {
+    const seat = this.seats.findIndex(s => s.peerId === peer)
+    return seat === -1 ? null : seat
   }
 
   override react(emoji: Reaction) {
@@ -472,8 +507,8 @@ export class HostSession extends GameSession {
     this.send({ t: 'sound', sound })
   }
 
-  private send(msg: HostMsg) {
-    this.transport.send(msg)
+  private send(msg: HostMsg, target?: PeerId) {
+    this.transport.send(msg, target)
   }
 
   override leave() {
@@ -501,11 +536,14 @@ export class GuestSession extends BaseSession {
         this.emitReaction(m.emoji)
       } else if (m.t === 'sound' && isSoundId(m.sound)) {
         this.emitSound(m.sound)
+      } else if (m.t === 'full') {
+        // Better to say so than to sit on a lobby screen that never fills.
+        this.status({ kind: 'full' })
       }
     })
 
     transport.onPeerJoin(() => {
-      this.transport.send({ t: 'hello' } satisfies ClientMsg)
+      this.transport.send({ t: 'hello', clientId: clientId() } satisfies ClientMsg)
     })
 
     transport.onPeerLeave(() => {
@@ -515,7 +553,9 @@ export class GuestSession extends BaseSession {
 
   start() {
     this.status({ kind: 'waiting' })
-    if (this.transport.isConnected()) this.transport.send({ t: 'hello' } satisfies ClientMsg)
+    if (this.transport.isConnected()) {
+      this.transport.send({ t: 'hello', clientId: clientId() } satisfies ClientMsg)
+    }
   }
 
   play(card: CardId) {
@@ -547,18 +587,36 @@ export class GuestSession extends BaseSession {
 
 // --- convenience constructors ------------------------------------------------
 
+/**
+ * Seats for a room the host just opened: the host takes seat 0 and the rest
+ * are held open for whoever joins.
+ */
+function defaultOnlineSeats(settings: MatchSettings): SeatConfig[] {
+  const seats: SeatConfig[] = [{ control: 'local' }]
+  for (let i = 1; i < settings.players; i++) seats.push({ control: 'remote' })
+  return seats
+}
+
 /** Solo play: seat 0 is you, every other seat is a bot. */
-export function aiSession(settings: MatchSettings, players: PlayerCount = 2): GameSession {
+export function aiSession(
+  settings: MatchSettings,
+  players: PlayerCount = 2,
+  seed: number = randomSeed(),
+): GameSession {
   const seats: SeatConfig[] = [{ control: 'local' }]
   for (let i = 1; i < players; i++) seats.push({ control: 'ai' })
-  return new GameSession(seats, randomSeed(), settings)
+  return new GameSession(seats, seed, settings)
 }
 
 /** Everyone on one device, passing it round. */
-export function hotseatSession(settings: MatchSettings, players: PlayerCount = 2): GameSession {
+export function hotseatSession(
+  settings: MatchSettings,
+  players: PlayerCount = 2,
+  seed: number = randomSeed(),
+): GameSession {
   return new GameSession(
     Array.from({ length: players }, () => ({ control: 'local' as const })),
-    randomSeed(),
+    seed,
     settings,
   )
 }

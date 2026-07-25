@@ -96,7 +96,11 @@ export function isReaction(value: unknown): value is Reaction {
 
 /** Guest → host. The guest only ever expresses intent. */
 export type ClientMsg =
-  | { readonly t: 'hello' }
+  /**
+   * Announce this browser. The clientId survives reloads, which is how the
+   * host tells a returning player from a new one and restores their seat.
+   */
+  | { readonly t: 'hello'; readonly clientId: string }
   | { readonly t: 'play'; readonly card: CardId }
   | { readonly t: 'rematch' }
   | { readonly t: 'react'; readonly emoji: Reaction }
@@ -106,6 +110,10 @@ export type ClientMsg =
 
 /** Host → guest. The host is authoritative. */
 export type HostMsg =
+  /** Which seat this browser has been given, sent once on joining. */
+  | { readonly t: 'seated'; readonly seat: Seat; readonly players: number }
+  /** No room at the table. */
+  | { readonly t: 'full' }
   | { readonly t: 'view'; readonly view: PublicView }
   | { readonly t: 'trick'; readonly trick: TrickSummary }
   | { readonly t: 'react'; readonly emoji: Reaction }

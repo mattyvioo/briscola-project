@@ -29,6 +29,8 @@ const it = {
   connecting: 'Connessione in corso…',
   waitingOpponent: 'In attesa dell’avversario…',
   opponentLeft: 'L’avversario si è disconnesso',
+  roomFull: 'Partita al completo',
+  roomFullHint: 'Tutti i posti a questo tavolo sono occupati.',
 
   you: 'Tu',
   opponent: 'Avversario',
@@ -117,6 +119,8 @@ const en: typeof it = {
   connecting: 'Connecting…',
   waitingOpponent: 'Waiting for opponent…',
   opponentLeft: 'Your opponent disconnected',
+  roomFull: 'Table is full',
+  roomFullHint: 'Every seat at this table is taken.',
 
   you: 'You',
   opponent: 'Opponent',

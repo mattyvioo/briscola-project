@@ -3,31 +3,57 @@ import { aiSession, hotseatSession, HostSession, type SessionStatus } from './se
 import { REACTIONS, type NetMsg, type PublicView } from './protocol'
 import type { Transport } from './transport'
 import { TOTAL_POINTS } from '../game/rules'
+import { freshDeck } from '../game/deck'
 import { DEFAULT_SETTINGS } from '../game/settings'
 import { SOUND_IDS } from '../ui/sounds'
 
-/** In-memory transport that records what the host sent and can inject peer messages. */
+interface SentMsg {
+  msg: NetMsg
+  target?: string
+}
+
+/**
+ * In-memory transport recording what the host sent *and to whom*, so tests can
+ * assert that hands only ever go to the seat that holds them.
+ */
 function fakeTransport() {
-  const sent: NetMsg[] = []
-  let onMessage: ((m: NetMsg) => void) | null = null
-  let onJoin: (() => void) | null = null
-  let connected = true
+  const sent: SentMsg[] = []
+  const messageHandlers: ((m: NetMsg, from: string) => void)[] = []
+  const joinHandlers: ((p: string) => void)[] = []
+  const leaveHandlers: ((p: string) => void)[] = []
+  let connectedPeers: string[] = []
 
   const transport: Transport = {
-    send: m => void sent.push(m),
-    onMessage: h => void (onMessage = h),
-    onPeerJoin: h => void (onJoin = h),
-    onPeerLeave: () => {},
-    isConnected: () => connected,
-    leave: () => void (connected = false),
+    send: (msg, target) => void sent.push(target === undefined ? { msg } : { msg, target }),
+    onMessage: h => void messageHandlers.push(h),
+    onPeerJoin: h => void joinHandlers.push(h),
+    onPeerLeave: h => void leaveHandlers.push(h),
+    peers: () => connectedPeers,
+    isConnected: () => connectedPeers.length > 0,
+    leave: () => void (connectedPeers = []),
   }
 
   return {
     transport,
     sent,
-    receive: (m: NetMsg) => onMessage?.(m),
-    join: () => onJoin?.(),
+    /** Messages addressed to nobody in particular. */
+    broadcasts: () => sent.filter(s => s.target === undefined).map(s => s.msg),
+    to: (peer: string) => sent.filter(s => s.target === peer).map(s => s.msg),
+    receive: (m: NetMsg, from = 'peer-1') => messageHandlers.forEach(h => h(m, from)),
+    join: (peer = 'peer-1') => {
+      connectedPeers = [...connectedPeers, peer]
+      joinHandlers.forEach(h => h(peer))
+    },
+    part: (peer = 'peer-1') => {
+      connectedPeers = connectedPeers.filter(p => p !== peer)
+      leaveHandlers.forEach(h => h(peer))
+    },
   }
+}
+
+/** A peer announcing itself, which is what earns it a seat. */
+function hello(clientId: string): NetMsg {
+  return { t: 'hello', clientId }
 }
 
 describe('trick pause honours the configured pace', () => {
@@ -118,8 +144,9 @@ describe('public view', () => {
     const host = new HostSession(f.transport, 42, DEFAULT_SETTINGS)
     host.start()
     f.join()
+    f.receive(hello('client-a'))
 
-    const guestViews = f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view)
+    const guestViews = f.to('peer-1').filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view)
     expect(guestViews.length).toBeGreaterThan(0)
     for (const v of guestViews) {
       expect(v.hand).toHaveLength(3)
@@ -159,7 +186,7 @@ describe('reactions', () => {
     const f = fakeTransport()
     const host = new HostSession(f.transport, 1, DEFAULT_SETTINGS)
     host.react(REACTIONS[1])
-    expect(f.sent).toContainEqual({ t: 'react', emoji: REACTIONS[1] })
+    expect(f.broadcasts()).toContainEqual({ t: 'react', emoji: REACTIONS[1] })
   })
 })
 
@@ -169,8 +196,9 @@ describe('host authority', () => {
     const host = new HostSession(f.transport, 3, DEFAULT_SETTINGS)
     host.start()
     f.join()
+    f.receive(hello('client-a'))
 
-    const view = f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+    const view = f.to('peer-1').filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
     // Seat 1 leads on dealer 0, so make it the host's turn first.
     if (view.turn === 1) {
       host.play(view.hand[0]!.id) // not the host's turn -> ignored
@@ -179,10 +207,11 @@ describe('host authority', () => {
     f.sent.length = 0
     // A card the guest does not hold.
     f.receive({ t: 'play', card: 'denari-1' })
-    const errors = f.sent.filter(m => m.t === 'error')
+    const out = f.to('peer-1')
     // Either the card was legitimately held, or the host refused it — never a
     // silent state change.
-    expect(errors.length + f.sent.filter(m => m.t === 'view').length).toBeGreaterThan(0)
+    expect(out.filter(m => m.t === 'error').length + out.filter(m => m.t === 'view').length)
+      .toBeGreaterThan(0)
   })
 })
 
@@ -214,9 +243,10 @@ describe('shared deck style', () => {
     const host = new HostSession(f.transport, 8, { ...DEFAULT_SETTINGS, deck: 'napoletane' })
     host.start()
     f.join()
+    f.receive(hello('client-a'))
 
     const viewOf = () =>
-      f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+      f.to('peer-1').filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
     expect(viewOf().deck).toBe('napoletane')
 
     // The guest asks; the host is still the authority and rebroadcasts.
@@ -229,9 +259,10 @@ describe('shared deck style', () => {
     const host = new HostSession(f.transport, 8, { ...DEFAULT_SETTINGS, deck: 'napoletane' })
     host.start()
     f.join()
+    f.receive(hello('client-a'))
 
     f.receive({ t: 'settings', deck: '../../etc/passwd' } as unknown as NetMsg)
-    const view = f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+    const view = f.to('peer-1').filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
     expect(view.deck).toBe('napoletane')
   })
 })
@@ -295,18 +326,27 @@ describe('seat control', () => {
     expect(hotStatuses.some(st => st.kind === 'handoff')).toBe(true)
   })
 
-  it('refuses a move for a seat the local player does not control', () => {
+  it('ignores a card the local player does not hold', () => {
     const views: PublicView[] = []
-    const s = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5 })
+    const s = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5 }, 2, 4242)
     s.onView(v => views.push(v))
     s.start()
     settle()
 
+    const view = views.at(-1)!
+    expect(view.turn).toBe(0)
+    // Pick a card that is provably not in our hand, so this cannot pass by
+    // accident on a lucky deal.
+    const held = new Set(view.hand.map(c => c.id))
+    const notHeld = freshDeck().find(c => !held.has(c.id))!
+
     const before = views.length
-    // A card the bot holds, not us — the session must simply ignore it.
-    s.play('denari-1')
-    s.play('coppe-1')
+    s.play(notHeld.id)
     expect(views.length).toBe(before)
+
+    // A card we do hold still works, proving the guard is not simply off.
+    s.play(view.hand[0]!.id)
+    expect(views.length).toBeGreaterThan(before)
   })
 })
 
@@ -371,5 +411,97 @@ describe('match play through a session', () => {
       expect(v.match.myTeam).toBe(0)
       expect(v.match.myScore).toBe(v.match.scores[0])
     }
+  })
+})
+
+describe('redaction with several peers', () => {
+  /** Seats N-1 remote players at a table, each with its own peer id. */
+  function seatEveryone(players: 3 | 4) {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 99, { ...DEFAULT_SETTINGS, players })
+    host.start()
+    const peers = Array.from({ length: players - 1 }, (_, i) => `peer-${i + 1}`)
+    peers.forEach((p, i) => {
+      f.join(p)
+      f.receive(hello(`client-${i + 1}`), p)
+    })
+    return { f, host, peers }
+  }
+
+  it.each([3, 4] as const)('never broadcasts a hand at %i players', players => {
+    const { f } = seatEveryone(players)
+
+    // The critical property: anything carrying cards must name its recipient.
+    for (const msg of f.broadcasts()) {
+      expect(msg.t, `broadcast ${msg.t} would reach every peer`).not.toBe('view')
+    }
+  })
+
+  it.each([3, 4] as const)('sends each peer only its own hand at %i players', players => {
+    const { f, peers } = seatEveryone(players)
+
+    const handsByPeer = new Map<string, string[]>()
+    peers.forEach((peer, i) => {
+      const views = f.to(peer).filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view)
+      expect(views.length, `peer ${peer} got no view`).toBeGreaterThan(0)
+      const view = views.at(-1)!
+      // Seat 0 is the host, so the first joiner takes seat 1 and so on.
+      expect(view.mySeat).toBe(i + 1)
+      expect(view.hand).toHaveLength(3)
+      handsByPeer.set(peer, view.hand.map(c => c.id))
+    })
+
+    // No card may appear in two different players' hands.
+    const all = [...handsByPeer.values()].flat()
+    expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('routes a move by peer, not by whose turn it happens to be', () => {
+    const { f, peers } = seatEveryone(4)
+    const viewOf = (peer: string) =>
+      f.to(peer).filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+
+    const turn = viewOf(peers[0]!).turn
+    const wrongPeer = peers.find((_, i) => i + 1 !== turn)!
+    const wrongView = viewOf(wrongPeer)
+
+    f.sent.length = 0
+    // A legal card, but sent by a peer whose turn it is not.
+    f.receive({ t: 'play', card: wrongView.hand[0]!.id }, wrongPeer)
+    expect(f.to(wrongPeer).some(m => m.t === 'error')).toBe(true)
+  })
+
+  it('turns away a peer once the table is full', () => {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 7, { ...DEFAULT_SETTINGS, players: 2 })
+    host.start()
+
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    expect(f.to('peer-1').some(m => m.t === 'seated')).toBe(true)
+
+    f.join('peer-2')
+    f.receive(hello('client-2'), 'peer-2')
+    expect(f.to('peer-2').some(m => m.t === 'full')).toBe(true)
+    expect(f.to('peer-2').some(m => m.t === 'view')).toBe(false)
+  })
+
+  it('gives a returning client its old seat back', () => {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 7, { ...DEFAULT_SETTINGS, players: 2 })
+    host.start()
+
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    const firstSeat = f.to('peer-1').find(m => m.t === 'seated') as { seat: number }
+
+    // Tab killed, reopened: new peer id, same clientId.
+    f.part('peer-1')
+    f.join('peer-9')
+    f.receive(hello('client-1'), 'peer-9')
+
+    const againSeat = f.to('peer-9').find(m => m.t === 'seated') as { seat: number }
+    expect(againSeat.seat).toBe(firstSeat.seat)
+    expect(f.to('peer-9').some(m => m.t === 'full')).toBe(false)
   })
 })

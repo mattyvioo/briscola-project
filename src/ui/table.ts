@@ -474,6 +474,7 @@ export class TableView {
 
     if (this.status.kind === 'handoff') return this.showOverlay(this.handoffPanel(this.status.seat))
     if (this.status.kind === 'disconnected') return this.showOverlay(this.disconnectedPanel())
+    if (this.status.kind === 'full') return this.showOverlay(this.fullPanel())
     if (this.status.kind === 'waiting') return this.showOverlay(this.waitingPanel())
     if (v && v.phase === 'over' && !v.resolving) return this.showOverlay(this.resultPanel(v))
 
@@ -496,6 +497,16 @@ export class TableView {
       this.roomCode ? el('p', { class: 'muted', text: t.shareCode }) : null,
       this.roomCode ? el('div', { class: 'code code-lg', text: this.roomCode }) : null,
       this.ghostButton(t.leave, () => this.callbacks.onLeave()),
+    )
+  }
+
+  private fullPanel(): HTMLElement {
+    return el(
+      'div',
+      { class: 'panel' },
+      el('h2', { text: t.roomFull }),
+      el('p', { class: 'muted', text: t.roomFullHint }),
+      this.primaryButton(t.leave, () => this.callbacks.onLeave()),
     )
   }
 
