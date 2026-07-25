@@ -28,9 +28,10 @@ Available from the main menu and from the lobby while you wait for an opponent.
   player put down. In an online game the **host's** choice governs: the host
   owns the state and runs that timer, so a guest setting would only
   desynchronise the two boards.
-- **Mazzo di carte** — Neapolitan or French artwork. This one is *per player*:
-  it is pure presentation, so you and your opponent can each use whichever pack
-  you prefer in the same game.
+- **Mazzo di carte** — Neapolitan or French artwork. **Shared**: either player
+  can change it (the guest asks, the host applies and rebroadcasts) and both
+  boards switch together, so you are always looking at the same cards. Also
+  switchable mid-game from the 🂠 button in the HUD.
 
 Both persist to `localStorage`.
 
@@ -44,9 +45,17 @@ Both persist to `localStorage`.
 - The counter next to the deck shows **tricks remaining**, not cards remaining.
 - The **previous trick** stays on screen (your card vs theirs, and who took it).
   Only the most recent one.
-- **Emoji reactions** (online only): tap one to float it across both screens.
-  Rate-limited to one every 1.5s, and the set is fixed — the receiving side
-  validates against it rather than rendering arbitrary strings.
+- **Emoji reactions** (online only): tap to float one across both screens.
+  Spam away — the gate is 80ms, only there to stop a held button saturating the
+  data channel, and at most 14 are on screen at once so it stays readable.
+- **Soundboard** (🔊 in the reaction bar): plays on *both* devices. Every sound
+  is synthesised with the Web Audio API rather than shipped as a file — the
+  recognisable meme clips are all somebody's copyright, and this repo is
+  public. See [`src/ui/sounds.ts`](src/ui/sounds.ts) for the recipes and for
+  how to swap in real recordings if you have the rights to some.
+
+Both the emoji set and the sound ids are fixed lists, validated on receipt —
+a modified peer cannot get an arbitrary string rendered or played.
 
 ### After a game
 

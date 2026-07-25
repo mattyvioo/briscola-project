@@ -132,83 +132,91 @@ const FRENCH_ROW = { spade: 0, coppe: 1, denari: 2, bastoni: 3 }
 const FRENCH_COL = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 10, 9: 11, 10: 12 }
 
 /**
- * Finds the card inside a grid cell.
+ * Cuts a card out of its grid cell.
  *
- * The sheet paints white cards on a flat green field. Chroma-keying the green
- * is not safe — the court cards contain green of their own — so instead scan
- * in from each edge for the first row/column that is not background, then mask
- * the rounded corners, which is the only place background survives the crop.
+ * The sheet paints white cards with rounded corners on a flat green field.
+ * Two approaches do *not* work:
+ *
+ *   - Chroma-keying the green: the court cards contain green of their own.
+ *   - Scanning in from the edges for the first non-background row: the card
+ *     boundary is anti-aliased, so the blend pixels stop the scan early and a
+ *     ring of green survives around the card.
+ *
+ * So flood-fill inwards from the border instead. Only background *connected to
+ * the edge* is removed, which takes the rounded corners and the whole
+ * anti-aliased fringe with it while leaving green inside the artwork alone.
  */
 async function cropCard(cellBuf, background) {
-  const { data, info } = await sharp(cellBuf).raw().toBuffer({ resolveWithObject: true })
-  const ch = info.channels
-  const at = (x, y) => {
-    const i = (y * info.width + x) * ch
-    return [data[i], data[i + 1], data[i + 2]]
-  }
-  // The background colour is sampled once from the whole sheet rather than
-  // per cell: some cards sit flush against their cell edge, so a corner pixel
-  // would sample the card itself and the scan would then "trim" the white
-  // card face away.
+  const { data, info } = await sharp(cellBuf)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  const { width, height, channels } = info
   const [br, bg, bb] = background
-  const isBg = (x, y) => {
-    const [r, g, b] = at(x, y)
-    return Math.abs(r - br) < 40 && Math.abs(g - bg) < 40 && Math.abs(b - bb) < 40
+  // Generous: it has to swallow the green-to-white blend ramp. Nothing on the
+  // card itself comes near this colour except the interior greens, which the
+  // flood fill can never reach from the border.
+  const TOLERANCE = 110
+
+  /**
+   * Background is either the green field or the transparent margin the SVG
+   * leaves around the artwork — a cell on the outside of the sheet contains
+   * both, and stopping at the transparent part would strand the green.
+   */
+  const isBackground = i => {
+    if (data[i + 3] < 16) return true
+    const dr = data[i] - br
+    const dg = data[i + 1] - bg
+    const db = data[i + 2] - bb
+    return Math.sqrt(dr * dr + dg * dg + db * db) < TOLERANCE
   }
-  const rowIsBg = y => {
-    for (let x = 0; x < info.width; x++) if (!isBg(x, y)) return false
-    return true
+
+  const seen = new Uint8Array(width * height)
+  const stack = []
+  const pushIf = (x, y) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return
+    const p = y * width + x
+    if (seen[p]) return
+    seen[p] = 1
+    if (isBackground(p * channels)) stack.push(p)
   }
-  const colIsBg = x => {
-    for (let y = 0; y < info.height; y++) if (!isBg(x, y)) return false
-    return true
+
+  for (let x = 0; x < width; x++) {
+    pushIf(x, 0)
+    pushIf(x, height - 1)
+  }
+  for (let y = 0; y < height; y++) {
+    pushIf(0, y)
+    pushIf(width - 1, y)
   }
 
-  let top = 0, bottom = info.height - 1, left = 0, right = info.width - 1
-  while (top < bottom && rowIsBg(top)) top++
-  while (bottom > top && rowIsBg(bottom)) bottom--
-  while (left < right && colIsBg(left)) left++
-  while (right > left && colIsBg(right)) right--
+  while (stack.length > 0) {
+    const p = stack.pop()
+    data[p * channels + 3] = 0 // transparent
+    const x = p % width
+    const y = (p / width) | 0
+    pushIf(x - 1, y)
+    pushIf(x + 1, y)
+    pushIf(x, y - 1)
+    pushIf(x, y + 1)
+  }
 
-  // Step in one more pixel all round: the card edge is anti-aliased against
-  // the green, and that blend fringe is what shows as a faint halo.
-  top += 1
-  bottom -= 1
-  left += 1
-  right -= 1
+  // Tight bounding box of what survived.
+  let top = height, bottom = -1, left = width, right = -1
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * channels + 3] === 0) continue
+      if (y < top) top = y
+      if (y > bottom) bottom = y
+      if (x < left) left = x
+      if (x > right) right = x
+    }
+  }
 
-  const width = right - left + 1
-  const height = bottom - top + 1
-
-  // Crop and resize in their own pass, *then* mask.
-  //
-  // Sharp runs a fixed internal pipeline (resize happens before composite)
-  // regardless of the order the calls are chained, so masking and resizing in
-  // one chain compares the mask against the already-shrunk image and fails
-  // with "Image to composite must have same dimensions or smaller".
-  const resized = await sharp(cellBuf)
-    .extract({ left, top, width, height })
+  return sharp(data, { raw: { width, height, channels } })
+    .extract({ left, top, width: right - left + 1, height: bottom - top + 1 })
     .resize({ width: WIDTH, withoutEnlargement: true })
-    .png()
-    .toBuffer()
-
-  const meta = await sharp(resized).metadata()
-  const w = meta.width
-  const h = meta.height
-
-  // Knock out the rounded corners so no green shows around the card edge.
-  // The mask is rasterised to exact pixels because librsvg scales by DPI.
-  const radius = Math.round(w * 0.055)
-  const mask = await sharp(
-    Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="${w}" height="${h}" rx="${radius}" ry="${radius}" fill="#fff"/></svg>`,
-    ),
-  )
-    .resize(w, h, { fit: 'fill' })
-    .png()
-    .toBuffer()
-
-  return sharp(resized).composite([{ input: mask, blend: 'dest-in' }])
 }
 
 async function buildFrancesi(dir) {
@@ -239,9 +247,15 @@ async function buildFrancesi(dir) {
   const cw = meta.width / 13
   const chh = meta.height / 4
 
-  // The sheet's very first pixel is always the green field around the cards.
-  const probe = await sharp(sheet).extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer()
+  // Sample the green from a gutter *between* two cards. The sheet's own corner
+  // is transparent — the SVG leaves a margin — so (0,0) is not the field
+  // colour and using it matches nothing.
+  const probe = await sharp(sheet)
+    .extract({ left: Math.round(cw) - 2, top: Math.round(chh / 2), width: 1, height: 1 })
+    .raw()
+    .toBuffer()
   const background = [probe[0], probe[1], probe[2]]
+  console.log(`  field colour rgb(${background.join(',')})`)
 
   let total = 0
   for (const [suit, rank] of needed) {

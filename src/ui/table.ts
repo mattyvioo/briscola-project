@@ -1,11 +1,20 @@
 import type { Card, CardId } from '../game/deck'
-import { parseCard } from '../game/deck'
-import { suitName, type DeckId } from '../game/decks'
+import { freshDeck, parseCard } from '../game/deck'
+import { DECK_IDS, deckStyle, suitName, type DeckId } from '../game/decks'
 import { other, TOTAL_POINTS, type Seat } from '../game/rules'
 import { REACTIONS, type PublicView, type Reaction } from '../net/protocol'
 import type { SessionStatus } from '../net/session'
-import { cardBack, cardFace, suitPip } from './card'
+import { cardBack, cardFace, preloadDeck, suitPip } from './card'
 import { clear, el, syncKeyed } from './dom'
+import {
+  isMuted,
+  playSound,
+  setMuted,
+  SOUND_IDS,
+  SOUND_LABELS,
+  unlockAudio,
+  type SoundId,
+} from './sounds'
 import { t } from './strings'
 
 export interface TableCallbacks {
@@ -14,12 +23,21 @@ export interface TableCallbacks {
   onLeave(): void
   onHandoff(): void
   onReact(emoji: Reaction): void
+  onSound(sound: SoundId): void
+  onDeck(deck: DeckId): void
 }
 
 type Mode = 'online' | 'ai' | 'hotseat'
 
-/** Reactions are cheap to send and easy to spam; one every 1.5s is plenty. */
-const REACTION_COOLDOWN_MS = 1500
+/**
+ * Spamming reactions is the point, so the cooldown only exists to stop a
+ * held-down button saturating the data channel. The visible cap is what keeps
+ * the screen readable.
+ */
+const REACTION_COOLDOWN_MS = 80
+const MAX_FLOATING_REACTIONS = 14
+/** Sounds overlap badly, so they get a real (if still short) gate. */
+const SOUND_COOLDOWN_MS = 350
 
 export class TableView {
   readonly root: HTMLElement
@@ -37,13 +55,17 @@ export class TableView {
   private lastTrickBox: HTMLElement
   private reactionBar: HTMLElement
   private reactionLayer: HTMLElement
+  private soundTray: HTMLElement
+  private deckBtn: HTMLElement
 
   private view: PublicView | null = null
   private status: SessionStatus = { kind: 'waiting' }
   private lastReactionAt = 0
+  private lastSoundAt = 0
 
   constructor(
     private mode: Mode,
+    /** Fallback until the first view arrives; after that the view decides. */
     private deck: DeckId,
     private callbacks: TableCallbacks,
     private roomCode: string | null = null,
@@ -61,10 +83,26 @@ export class TableView {
     this.overlay = el('div', { class: 'overlay', hidden: true })
     this.lastTrickBox = el('div', { class: 'last-trick', hidden: true })
     this.reactionLayer = el('div', { class: 'reaction-layer', 'aria-hidden': 'true' })
+    this.soundTray = el('div', { class: 'sound-tray', hidden: true })
     this.reactionBar = this.buildReactionBar()
 
     const leave = el('button', { class: 'btn-ghost btn-leave', type: 'button' }, t.leave)
     leave.addEventListener('click', () => this.callbacks.onLeave())
+
+    // Cycling the deck mid-game is the quickest control that fits in the HUD,
+    // and since the deck is shared it changes both boards at once.
+    this.deckBtn = el('button', {
+      class: 'btn-ghost btn-deck',
+      type: 'button',
+      'aria-label': t.cardStyle,
+      title: t.deckShared,
+      text: '🂠',
+    })
+    this.deckBtn.addEventListener('click', () => {
+      const ids = DECK_IDS
+      const next = ids[(ids.indexOf(this.deck) + 1) % ids.length]!
+      this.callbacks.onDeck(next)
+    })
 
     this.root = el(
       'div',
@@ -73,14 +111,14 @@ export class TableView {
         'div',
         { class: 'hud' },
         el('div', { class: 'score score-theirs' }, this.nameTheirs, this.hudTheirs),
-        leave,
+        el('div', { class: 'hud-mid' }, this.deckBtn, leave),
         el('div', { class: 'score score-mine' }, this.nameMine, this.hudMine),
       ),
       this.opponentHand,
       el('div', { class: 'board' }, this.stock, this.trick, this.lastTrickBox),
       this.banner,
       this.myHand,
-      this.reactionBar,
+      el('div', { class: 'bar-wrap' }, this.soundTray, this.reactionBar),
       this.reactionLayer,
       this.overlay,
     )
@@ -137,6 +175,11 @@ export class TableView {
 
   update(view: PublicView) {
     this.view = view
+    // Deck style is shared match state, so follow whatever the view says. When
+    // the opponent switches it, warm the new artwork so cards don't pop in.
+    if (view.deck !== this.deck) preloadDeck(freshDeck(), view.deck)
+    this.deck = view.deck
+    this.deckBtn.title = `${deckStyle(view.deck).label} — ${t.deckShared}`
 
     const { mine, theirs } = this.labels(view)
     this.nameMine.textContent = mine
@@ -157,6 +200,7 @@ export class TableView {
 
   private buildReactionBar(): HTMLElement {
     const bar = el('div', { class: 'reaction-bar' })
+
     for (const emoji of REACTIONS) {
       const b = el('button', {
         class: 'reaction-btn',
@@ -167,6 +211,47 @@ export class TableView {
       b.addEventListener('click', () => this.sendReaction(emoji))
       bar.appendChild(b)
     }
+
+    // Sounds live in a tray rather than a second permanent row: vertical space
+    // is the scarce resource on a phone in landscape.
+    const toggle = el('button', {
+      class: 'reaction-btn bar-toggle',
+      type: 'button',
+      'aria-label': t.soundboard,
+      text: '🔊',
+    })
+    toggle.addEventListener('click', () => {
+      unlockAudio()
+      this.soundTray.hidden = !this.soundTray.hidden
+      toggle.classList.toggle('is-open', !this.soundTray.hidden)
+    })
+    bar.appendChild(toggle)
+
+    for (const id of SOUND_IDS) {
+      const { icon, label } = SOUND_LABELS[id]
+      const b = el('button', {
+        class: 'sound-btn',
+        type: 'button',
+        title: label,
+        'aria-label': label,
+        text: icon,
+      })
+      b.addEventListener('click', () => this.sendSound(id))
+      this.soundTray.appendChild(b)
+    }
+
+    const mute = el('button', {
+      class: 'sound-btn sound-mute',
+      type: 'button',
+      'aria-label': t.mute,
+      text: isMuted() ? '🔇' : '🔈',
+    })
+    mute.addEventListener('click', () => {
+      setMuted(!isMuted())
+      mute.textContent = isMuted() ? '🔇' : '🔈'
+    })
+    this.soundTray.appendChild(mute)
+
     return bar
   }
 
@@ -176,15 +261,34 @@ export class TableView {
     this.lastReactionAt = now
     this.callbacks.onReact(emoji)
     this.showReaction(emoji, 'mine')
-    this.reactionBar.classList.add('is-cooling')
-    setTimeout(() => this.reactionBar.classList.remove('is-cooling'), REACTION_COOLDOWN_MS)
+  }
+
+  private sendSound(id: SoundId) {
+    const now = Date.now()
+    if (now - this.lastSoundAt < SOUND_COOLDOWN_MS) return
+    this.lastSoundAt = now
+    unlockAudio()
+    playSound(id)
+    this.callbacks.onSound(id)
+    this.showReaction(SOUND_LABELS[id].icon as Reaction, 'mine')
+  }
+
+  /** Plays a sound the opponent triggered, and shows what caused it. */
+  playRemoteSound(id: SoundId) {
+    playSound(id)
+    this.showReaction(SOUND_LABELS[id].icon as Reaction, 'theirs')
   }
 
   /** Floats an emoji up from the relevant side of the table. */
-  showReaction(emoji: Reaction, from: 'mine' | 'theirs') {
+  showReaction(emoji: string, from: 'mine' | 'theirs') {
+    // Cap the layer: spamming is encouraged, an unreadable screen is not.
+    const live = this.reactionLayer.children
+    while (live.length >= MAX_FLOATING_REACTIONS) live[0]!.remove()
+
     const node = el('span', { class: `reaction reaction-${from}`, text: emoji })
     // Jitter horizontally so a burst doesn't stack into one illegible pile.
-    node.style.setProperty('--drift', `${Math.round((Math.random() - 0.5) * 60)}px`)
+    node.style.setProperty('--drift', `${Math.round((Math.random() - 0.5) * 90)}px`)
+    node.style.setProperty('--delay', `${Math.round(Math.random() * 90)}ms`)
     this.reactionLayer.appendChild(node)
     node.addEventListener('animationend', () => node.remove())
   }
@@ -198,11 +302,13 @@ export class TableView {
 
   private renderMyHand(view: PublicView) {
     const playable = this.canPlay()
+    // The deck is part of the key: nodes are reused by key, so keying on the
+    // card id alone would leave the old artwork in place when the deck changes.
     syncKeyed(
       this.myHand,
-      view.hand.map(c => c.id),
+      view.hand.map(c => `${view.deck}:${c.id}`),
       key =>
-        cardFace(parseCard(key as CardId), {
+        cardFace(parseCard(key.split(':')[1] as CardId), {
           deck: this.deck,
           playable: true,
           trump: view.trumpSuit,
@@ -339,6 +445,7 @@ export class TableView {
 
     // Reactions only make sense when there is another browser to receive them.
     this.reactionBar.hidden = this.mode !== 'online' || this.status.kind !== 'playing'
+    if (this.reactionBar.hidden) this.soundTray.hidden = true
 
     if (this.status.kind === 'handoff') return this.showOverlay(this.handoffPanel(this.status.seat))
     if (this.status.kind === 'disconnected') return this.showOverlay(this.disconnectedPanel())

@@ -1,5 +1,7 @@
 import type { Card, CardId, Suit } from '../game/deck'
+import type { DeckId } from '../game/decks'
 import type { Seat } from '../game/rules'
+import type { SoundId } from '../ui/sounds'
 
 /**
  * What a player is allowed to see. The host holds the full GameState and
@@ -40,6 +42,13 @@ export interface PublicView {
   } | null
   readonly phase: 'playing' | 'over'
   /**
+   * Card artwork both players see. Shared rather than per-player: choosing a
+   * deck is part of setting up the match, and having each side quietly look at
+   * different cards makes it impossible to talk about the game ("the king of
+   * cups" / "which king?").
+   */
+  readonly deck: DeckId
+  /**
    * True while a completed trick is being shown before it is swept up. The UI
    * blocks input and highlights the winner during this window.
    */
@@ -73,12 +82,16 @@ export type ClientMsg =
   | { readonly t: 'play'; readonly card: CardId }
   | { readonly t: 'rematch' }
   | { readonly t: 'react'; readonly emoji: Reaction }
+  | { readonly t: 'sound'; readonly sound: SoundId }
+  /** Ask the host to change a shared setting; the host is still the authority. */
+  | { readonly t: 'settings'; readonly deck: DeckId }
 
 /** Host → guest. The host is authoritative. */
 export type HostMsg =
   | { readonly t: 'view'; readonly view: PublicView }
   | { readonly t: 'trick'; readonly trick: TrickSummary }
   | { readonly t: 'react'; readonly emoji: Reaction }
+  | { readonly t: 'sound'; readonly sound: SoundId }
   | { readonly t: 'error'; readonly message: string }
 
 export type NetMsg = ClientMsg | HostMsg

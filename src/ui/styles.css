@@ -716,9 +716,60 @@ body {
 .reaction-bar[hidden] {
   display: none;
 }
-.reaction-bar.is-cooling {
-  opacity: 0.45;
-  pointer-events: none;
+/* Anchors the sound tray above the bar without giving it a permanent grid row —
+   vertical space is the scarce resource on a phone in landscape. */
+.bar-wrap {
+  position: relative;
+}
+
+.sound-tray {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+  padding: 6px;
+  border-radius: 12px;
+  background: #0b241acc;
+  border: 1px solid #ffffff26;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 28px #00000073;
+  z-index: 9;
+  animation: panel-in 0.15s ease-out;
+}
+.sound-tray[hidden] {
+  display: none;
+}
+
+.sound-btn {
+  min-width: 38px;
+  min-height: 38px;
+  font-size: 1.1rem;
+  line-height: 1;
+  border-radius: 10px;
+  background: #ffffff14;
+  border: 1px solid #ffffff1a;
+  cursor: pointer;
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+.sound-btn:active {
+  transform: scale(0.9);
+}
+.sound-mute {
+  background: #ffffff08;
+}
+@media (hover: hover) {
+  .sound-btn:hover {
+    background: #ffffff2e;
+  }
+}
+
+.bar-toggle.is-open {
+  background: var(--gold);
 }
 .reaction-btn {
   min-width: 34px;
@@ -752,7 +803,9 @@ body {
   position: absolute;
   left: 50%;
   font-size: clamp(1.8rem, 8vw, 3rem);
-  animation: float-up 2s ease-out forwards;
+  /* The stagger keeps a rapid burst from moving as one solid block. */
+  animation: float-up 1.6s ease-out var(--delay, 0ms) forwards;
+  opacity: 0;
   will-change: transform, opacity;
 }
 .reaction-mine {
@@ -913,4 +966,20 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* HUD centre cluster: deck switch + leave ---------------------------------- */
+
+.hud-mid {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.btn-deck {
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 1.05rem;
+  line-height: 1;
 }

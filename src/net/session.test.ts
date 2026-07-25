@@ -4,6 +4,7 @@ import { REACTIONS, type NetMsg, type PublicView } from './protocol'
 import type { Transport } from './transport'
 import { TOTAL_POINTS } from '../game/rules'
 import { DEFAULT_SETTINGS } from '../game/settings'
+import { SOUND_IDS } from '../ui/sounds'
 
 /** In-memory transport that records what the host sent and can inject peer messages. */
 function fakeTransport() {
@@ -183,5 +184,55 @@ describe('host authority', () => {
     // Either the card was legitimately held, or the host refused it — never a
     // silent state change.
     expect(errors.length + f.sent.filter(m => m.t === 'view').length).toBeGreaterThan(0)
+  })
+})
+
+describe('soundboard', () => {
+  it('relays a valid sound from the guest', () => {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 1, DEFAULT_SETTINGS)
+    const heard: string[] = []
+    host.onSound(s => heard.push(s))
+
+    f.receive({ t: 'sound', sound: SOUND_IDS[0] })
+    expect(heard).toEqual([SOUND_IDS[0]])
+  })
+
+  it('ignores a sound id that is not in the set', () => {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 1, DEFAULT_SETTINGS)
+    const heard: string[] = []
+    host.onSound(s => heard.push(s))
+
+    f.receive({ t: 'sound', sound: 'rickroll' } as unknown as NetMsg)
+    expect(heard).toEqual([])
+  })
+})
+
+describe('shared deck style', () => {
+  it('is carried in the view so both players see the same cards', () => {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 8, { ...DEFAULT_SETTINGS, deck: 'napoletane' })
+    host.start()
+    f.join()
+
+    const viewOf = () =>
+      f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+    expect(viewOf().deck).toBe('napoletane')
+
+    // The guest asks; the host is still the authority and rebroadcasts.
+    f.receive({ t: 'settings', deck: 'francesi' })
+    expect(viewOf().deck).toBe('francesi')
+  })
+
+  it('refuses an unknown deck id from a peer', () => {
+    const f = fakeTransport()
+    const host = new HostSession(f.transport, 8, { ...DEFAULT_SETTINGS, deck: 'napoletane' })
+    host.start()
+    f.join()
+
+    f.receive({ t: 'settings', deck: '../../etc/passwd' } as unknown as NetMsg)
+    const view = f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+    expect(view.deck).toBe('napoletane')
   })
 })

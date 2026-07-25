@@ -5,6 +5,8 @@ import { other, type Seat } from '../game/rules'
 import { randomSeed } from '../game/rng'
 import { DEFAULT_SETTINGS, type MatchSettings } from '../game/settings'
 import { isReaction, type ClientMsg, type HostMsg, type NetMsg, type PublicView, type Reaction, type TrickSummary } from './protocol'
+import { isSoundId, type SoundId } from '../ui/sounds'
+import { isDeckId, type DeckId } from '../game/decks'
 import type { Transport } from './transport'
 
 /** A beat before the AI answers, so it doesn't feel instantaneous. */
@@ -23,10 +25,16 @@ export interface Session {
   onStatus(handler: (status: SessionStatus) => void): void
   /** Fires when the *opponent* sends a reaction. Online only. */
   onReaction(handler: (emoji: Reaction) => void): void
+  /** Fires when the *opponent* triggers a soundboard sound. Online only. */
+  onSound(handler: (sound: SoundId) => void): void
   play(card: CardId): void
   rematch(): void
   /** Send a reaction to the opponent. No-op offline. */
   react(emoji: Reaction): void
+  /** Play a soundboard sound on the opponent's device too. No-op offline. */
+  sound(sound: SoundId): void
+  /** Change the shared deck style. Online, the host applies and rebroadcasts. */
+  setDeck(deck: DeckId): void
   /** Hotseat only: the next player has picked up the device. */
   confirmHandoff(): void
   leave(): void
@@ -36,6 +44,7 @@ export interface Session {
 function viewFor(
   state: GameState,
   seat: Seat,
+  deck: DeckId,
   opts: { table?: PublicView['table']; resolving?: boolean; lastWinner?: Seat | null } = {},
 ): PublicView {
   return {
@@ -51,6 +60,7 @@ function viewFor(
     myPoints: score(state, seat),
     opponentPoints: score(state, other(seat)),
     trickNumber: state.trickNumber,
+    deck,
     tricksLeft: tricksLeft(state),
     lastTrick: lastTrickFor(state, seat),
     phase: state.phase,
@@ -79,6 +89,7 @@ abstract class BaseSession implements Session {
   protected viewHandlers: ((view: PublicView) => void)[] = []
   protected statusHandlers: ((status: SessionStatus) => void)[] = []
   protected reactionHandlers: ((emoji: Reaction) => void)[] = []
+  protected soundHandlers: ((sound: SoundId) => void)[] = []
   protected timers = new Set<ReturnType<typeof setTimeout>>()
 
   onView(handler: (view: PublicView) => void) {
@@ -93,6 +104,10 @@ abstract class BaseSession implements Session {
     this.reactionHandlers.push(handler)
   }
 
+  onSound(handler: (sound: SoundId) => void) {
+    this.soundHandlers.push(handler)
+  }
+
   protected emit(view: PublicView) {
     for (const h of this.viewHandlers) h(view)
   }
@@ -105,9 +120,19 @@ abstract class BaseSession implements Session {
     for (const h of this.reactionHandlers) h(emoji)
   }
 
+  protected emitSound(sound: SoundId) {
+    for (const h of this.soundHandlers) h(sound)
+  }
+
   react(_emoji: Reaction) {
     // Only meaningful when there is another browser to send to.
   }
+
+  sound(_sound: SoundId) {
+    // Ditto — offline modes just play it locally.
+  }
+
+  abstract setDeck(deck: DeckId): void
 
   /** setTimeout that gets cleaned up on leave(), so a torn-down session goes quiet. */
   protected later(fn: () => void, ms: number) {
@@ -131,6 +156,7 @@ abstract class BaseSession implements Session {
     this.viewHandlers = []
     this.statusHandlers = []
     this.reactionHandlers = []
+    this.soundHandlers = []
   }
 }
 
@@ -157,10 +183,17 @@ abstract class AuthoritativeSession extends BaseSession {
    */
   applySettings(next: MatchSettings) {
     this.settings = next
+    this.broadcast()
+  }
+
+  /** Deck is shared match state, so changing it re-renders both boards. */
+  setDeck(deck: DeckId) {
+    this.settings = { ...this.settings, deck }
+    this.broadcast()
   }
 
   /** Push the current state out to whoever needs to see it. */
-  protected abstract broadcast(opts?: Parameters<typeof viewFor>[2]): void
+  protected abstract broadcast(opts?: Parameters<typeof viewFor>[3]): void
 
   /** Called after a trick has been swept and it is someone's turn again. */
   protected abstract afterTrick(): void
@@ -227,8 +260,8 @@ export class AiSession extends AuthoritativeSession {
     this.maybeMoveBot()
   }
 
-  protected broadcast(opts?: Parameters<typeof viewFor>[2]) {
-    this.emit(viewFor(this.state, AiSession.HUMAN, opts))
+  protected broadcast(opts?: Parameters<typeof viewFor>[3]) {
+    this.emit(viewFor(this.state, AiSession.HUMAN, this.settings.deck, opts))
   }
 
   play(card: CardId) {
@@ -270,8 +303,8 @@ export class HotseatSession extends AuthoritativeSession {
     this.status({ kind: 'playing' })
   }
 
-  protected broadcast(opts?: Parameters<typeof viewFor>[2]) {
-    this.emit(viewFor(this.state, this.viewer, opts))
+  protected broadcast(opts?: Parameters<typeof viewFor>[3]) {
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, opts))
   }
 
   play(card: CardId) {
@@ -341,9 +374,9 @@ export class HostSession extends AuthoritativeSession {
     this.status(this.transport.isConnected() ? { kind: 'playing' } : { kind: 'waiting' })
   }
 
-  protected broadcast(opts?: Parameters<typeof viewFor>[2]) {
-    this.emit(viewFor(this.state, HostSession.HOST, opts))
-    this.send({ t: 'view', view: viewFor(this.state, HostSession.GUEST, opts) })
+  protected broadcast(opts?: Parameters<typeof viewFor>[3]) {
+    this.emit(viewFor(this.state, HostSession.HOST, this.settings.deck, opts))
+    this.send({ t: 'view', view: viewFor(this.state, HostSession.GUEST, this.settings.deck, opts) })
   }
 
   protected override onTrickResolved(trick: TrickSummary) {
@@ -377,11 +410,23 @@ export class HostSession extends AuthoritativeSession {
         // UI, and the allowed set is small and fixed.
         if (isReaction(m.emoji)) this.emitReaction(m.emoji)
         break
+      case 'sound':
+        if (isSoundId(m.sound)) this.emitSound(m.sound)
+        break
+      case 'settings':
+        // The guest may ask; the host still owns the state and rebroadcasts,
+        // so both boards end up agreeing.
+        if (isDeckId(m.deck)) this.setDeck(m.deck)
+        break
     }
   }
 
   override react(emoji: Reaction) {
     this.send({ t: 'react', emoji })
+  }
+
+  override sound(sound: SoundId) {
+    this.send({ t: 'sound', sound })
   }
 
   private send(msg: HostMsg) {
@@ -411,6 +456,8 @@ export class GuestSession extends BaseSession {
         this.emit(m.view)
       } else if (m.t === 'react' && isReaction(m.emoji)) {
         this.emitReaction(m.emoji)
+      } else if (m.t === 'sound' && isSoundId(m.sound)) {
+        this.emitSound(m.sound)
       }
     })
 
@@ -438,6 +485,15 @@ export class GuestSession extends BaseSession {
 
   override react(emoji: Reaction) {
     this.transport.send({ t: 'react', emoji } satisfies ClientMsg)
+  }
+
+  override sound(sound: SoundId) {
+    this.transport.send({ t: 'sound', sound } satisfies ClientMsg)
+  }
+
+  /** The guest has no state of its own: ask the host and wait for the view. */
+  setDeck(deck: DeckId) {
+    this.transport.send({ t: 'settings', deck } satisfies ClientMsg)
   }
 
   override leave() {

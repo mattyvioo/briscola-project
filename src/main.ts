@@ -78,6 +78,12 @@ function startTable(
       onLeave: goHome,
       onHandoff: () => next.confirmHandoff(),
       onReact: emoji => next.react(emoji),
+      onSound: sound => next.sound(sound),
+      onDeck: deck => {
+        // Remember the preference locally too, so the next game starts here.
+        updateSettings({ ...settings, deck })
+        next.setDeck(deck)
+      },
     },
     roomCode,
   )
@@ -85,6 +91,7 @@ function startTable(
   next.onView(view => table?.update(view))
   next.onStatus((status: SessionStatus) => table?.setStatus(status))
   next.onReaction(emoji => table?.showReaction(emoji, 'theirs'))
+  next.onSound(sound => table?.playRemoteSound(sound))
 
   show(table.root)
   onStarted()
