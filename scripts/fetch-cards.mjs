@@ -319,10 +319,15 @@ async function main() {
   // sliced locally; `bergamasche` needs 40 separate fetches and reliably trips
   // Commons' rate limiter, so it goes last — a stall there should not stop the
   // other decks from being built.
+  // bergamasche is opt-in (`npm run assets -- --all`). It is 40 separate
+  // Commons downloads that reliably trip their rate limiter, and a partial
+  // download is worse than none: the files are not selectable in the UI but
+  // still get committed and deployed as dead weight.
+  const wantAll = process.argv.includes('--all')
   const decks = [
     ['francesi', buildFrancesi],
     ['napoletane', buildNapoletane],
-    ['bergamasche', buildBergamasche],
+    ...(wantAll ? [['bergamasche', buildBergamasche]] : []),
   ]
 
   let total = 0
