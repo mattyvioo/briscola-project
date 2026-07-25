@@ -5,10 +5,10 @@ import { randomSeed } from './game/rng'
 import { loadSettings, saveSettings, type MatchSettings } from './game/settings'
 import { isValidRoomCode, makeRoomCode, normaliseRoomCode } from './net/protocol'
 import {
-  AiSession,
+  aiSession,
   GuestSession,
   HostSession,
-  HotseatSession,
+  hotseatSession,
   type Session,
   type SessionStatus,
 } from './net/session'
@@ -98,12 +98,12 @@ function startTable(
 }
 
 function playAi() {
-  const s = new AiSession(randomSeed(), 0, settings)
+  const s = aiSession(settings)
   startTable(s, 'ai', null, () => s.start())
 }
 
 function playHotseat() {
-  const s = new HotseatSession(randomSeed(), 0, settings)
+  const s = hotseatSession(settings)
   startTable(s, 'hotseat', null, () => s.start())
 }
 

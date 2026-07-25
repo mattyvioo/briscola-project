@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AiSession, HostSession, HotseatSession } from './session'
+import { aiSession, hotseatSession, HostSession, type SessionStatus } from './session'
 import { REACTIONS, type NetMsg, type PublicView } from './protocol'
 import type { Transport } from './transport'
 import { TOTAL_POINTS } from '../game/rules'
@@ -37,8 +37,8 @@ describe('trick pause honours the configured pace', () => {
   /** Plays a full trick and reports how long both cards stay on the table. */
   function measure(delayMs: number): { atPause: number; afterPause: number } {
     const views: PublicView[] = []
-    const s = new HotseatSession(1234, 0, { ...DEFAULT_SETTINGS, trickDelayMs: delayMs })
-    s.onView(v => views.push(v))
+    const s = hotseatSession({ ...DEFAULT_SETTINGS, trickDelayMs: delayMs })
+    s.onView((v: PublicView) => views.push(v))
     s.start()
 
     // Lead, hand over, then follow — completing the trick.
@@ -65,8 +65,8 @@ describe('trick pause honours the configured pace', () => {
 
   it('marks the trick as resolving only while it is held', () => {
     const views: PublicView[] = []
-    const s = new HotseatSession(99, 0, { ...DEFAULT_SETTINGS, trickDelayMs: 1000 })
-    s.onView(v => views.push(v))
+    const s = hotseatSession({ ...DEFAULT_SETTINGS, trickDelayMs: 1000 })
+    s.onView((v: PublicView) => views.push(v))
     s.start()
     s.play(views.at(-1)!.hand[0]!.id)
     s.confirmHandoff()
@@ -85,16 +85,16 @@ describe('public view', () => {
 
   it('counts tricks down from 20', () => {
     const views: PublicView[] = []
-    const s = new AiSession(7, 0, DEFAULT_SETTINGS)
-    s.onView(v => views.push(v))
+    const s = aiSession(DEFAULT_SETTINGS)
+    s.onView((v: PublicView) => views.push(v))
     s.start()
     expect(views.at(-1)!.tricksLeft).toBe(20)
   })
 
   it('exposes the previous trick from each seat, and only the previous one', () => {
     const views: PublicView[] = []
-    const s = new HotseatSession(5, 0, { ...DEFAULT_SETTINGS, trickDelayMs: 10 })
-    s.onView(v => views.push(v))
+    const s = hotseatSession({ ...DEFAULT_SETTINGS, trickDelayMs: 10 })
+    s.onView((v: PublicView) => views.push(v))
     s.start()
 
     expect(views.at(-1)!.lastTrick).toBeNull()
@@ -233,5 +233,79 @@ describe('shared deck style', () => {
     f.receive({ t: 'settings', deck: '../../etc/passwd' } as unknown as NetMsg)
     const view = f.sent.filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
     expect(view.deck).toBe('napoletane')
+  })
+})
+
+describe('seat control', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** Runs the clock forward, letting AI seats take their turns. */
+  function settle(ms = 60_000) {
+    vi.advanceTimersByTime(ms)
+  }
+
+  it.each([2, 3, 4] as const)('fills every non-human seat with a bot at %i players', players => {
+    const views: PublicView[] = []
+    const s = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 10 }, players)
+    s.onView(v => views.push(v))
+    s.start()
+    settle()
+
+    const view = views.at(-1)!
+    // Only seat 0 is human, so play must stop there and nowhere else.
+    expect(view.mySeat).toBe(0)
+    expect(view.turn).toBe(0)
+    expect(view.hand.length).toBeGreaterThan(0)
+  })
+
+  it.each([3, 4] as const)('plays a whole %i-player game with one human', players => {
+    const views: PublicView[] = []
+    const s = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5 }, players)
+    s.onView(v => views.push(v))
+    s.start()
+
+    let guard = 0
+    while (views.at(-1)!.phase === 'playing') {
+      if (guard++ > 200) throw new Error('game did not terminate')
+      settle(200)
+      const view = views.at(-1)!
+      if (view.phase === 'over') break
+      if (view.turn === 0 && !view.resolving && view.hand.length > 0) s.play(view.hand[0]!.id)
+    }
+    expect(views.at(-1)!.phase).toBe('over')
+    expect(views.at(-1)!.tricksLeft).toBe(0)
+  })
+
+  it('asks for a handoff only when more than one seat is local', () => {
+    const soloStatuses: SessionStatus[] = []
+    const solo = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5 })
+    solo.onStatus(st => soloStatuses.push(st))
+    solo.start()
+    settle()
+    expect(soloStatuses.some(st => st.kind === 'handoff')).toBe(false)
+
+    const hotStatuses: SessionStatus[] = []
+    const hotViews: PublicView[] = []
+    const hot = hotseatSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5 })
+    hot.onStatus(st => hotStatuses.push(st))
+    hot.onView(v => hotViews.push(v))
+    hot.start()
+    hot.play(hotViews.at(-1)!.hand[0]!.id)
+    expect(hotStatuses.some(st => st.kind === 'handoff')).toBe(true)
+  })
+
+  it('refuses a move for a seat the local player does not control', () => {
+    const views: PublicView[] = []
+    const s = aiSession({ ...DEFAULT_SETTINGS, trickDelayMs: 5 })
+    s.onView(v => views.push(v))
+    s.start()
+    settle()
+
+    const before = views.length
+    // A card the bot holds, not us — the session must simply ignore it.
+    s.play('denari-1')
+    s.play('coppe-1')
+    expect(views.length).toBe(before)
   })
 })

@@ -1,39 +1,66 @@
 import { chooseCard } from '../game/ai'
 import type { CardId } from '../game/deck'
+import { isDeckId, type DeckId } from '../game/decks'
 import { cardsLeftToDraw, newGame, play, score, tricksLeft, type GameState } from '../game/engine'
-import { other, type Seat } from '../game/rules'
+import { nextSeat, other, type Seat } from '../game/rules'
 import { randomSeed } from '../game/rng'
 import { DEFAULT_SETTINGS, type MatchSettings } from '../game/settings'
-import { isReaction, type ClientMsg, type HostMsg, type NetMsg, type PublicView, type Reaction, type TrickSummary } from './protocol'
+import type { PlayerCount } from '../game/table'
 import { isSoundId, type SoundId } from '../ui/sounds'
-import { isDeckId, type DeckId } from '../game/decks'
+import {
+  isReaction,
+  type ClientMsg,
+  type HostMsg,
+  type NetMsg,
+  type PublicView,
+  type Reaction,
+  type TrickSummary,
+} from './protocol'
 import type { Transport } from './transport'
 
-/** A beat before the AI answers, so it doesn't feel instantaneous. */
+/** A beat before an AI seat answers, so it doesn't feel instantaneous. */
 export const AI_THINK_MS = 650
+
+/**
+ * How a seat is driven.
+ *
+ * This one field replaces what used to be three near-identical session
+ * classes. Solo play is `['local', 'ai']`, hotseat is `['local', 'local']`,
+ * an online 1v1 is `['local', 'remote']`, and a four-handed game with two
+ * bots is `['local', 'ai', 'remote', 'ai']`. It is also what later lets a
+ * dropped player's seat be handed to an AI without touching the game loop.
+ */
+export type SeatControl = 'local' | 'ai' | 'remote'
+
+export interface SeatConfig {
+  control: SeatControl
+  name?: string
+  /** Survives a reload, unlike the transport's per-session peer id. */
+  clientId?: string
+  peerId?: string
+}
+
+export type SessionMode = 'online' | 'ai' | 'hotseat'
 
 export type SessionStatus =
   | { kind: 'waiting' }
   | { kind: 'playing' }
-  /** Hotseat only: hide the board and wait for the next player to take over. */
+  /** Hotseat only: hide the board until the next player picks the device up. */
   | { kind: 'handoff'; seat: Seat }
   | { kind: 'disconnected' }
 
 export interface Session {
-  readonly mode: 'online' | 'ai' | 'hotseat'
+  readonly mode: SessionMode
   onView(handler: (view: PublicView) => void): void
   onStatus(handler: (status: SessionStatus) => void): void
-  /** Fires when the *opponent* sends a reaction. Online only. */
+  /** Fires when *someone else* sends a reaction. Online only. */
   onReaction(handler: (emoji: Reaction) => void): void
-  /** Fires when the *opponent* triggers a soundboard sound. Online only. */
+  /** Fires when *someone else* triggers a soundboard sound. Online only. */
   onSound(handler: (sound: SoundId) => void): void
   play(card: CardId): void
   rematch(): void
-  /** Send a reaction to the opponent. No-op offline. */
   react(emoji: Reaction): void
-  /** Play a soundboard sound on the opponent's device too. No-op offline. */
   sound(sound: SoundId): void
-  /** Change the shared deck style. Online, the host applies and rebroadcasts. */
   setDeck(deck: DeckId): void
   /** Hotseat only: the next player has picked up the device. */
   confirmHandoff(): void
@@ -47,9 +74,12 @@ function viewFor(
   deck: DeckId,
   opts: { table?: PublicView['table']; resolving?: boolean; lastWinner?: Seat | null } = {},
 ): PublicView {
+  const players = state.config.players
   return {
     hand: state.hands[seat] ?? [],
-    opponentCards: state.hands[other(seat)]?.length ?? 0,
+    // At more than two seats this is the next player round, which is what the
+    // 1v1 layout already shows. Phase 6 generalises the board itself.
+    opponentCards: state.hands[nextSeat(seat, players)]?.length ?? 0,
     trumpCard: state.trumpCard,
     trumpSuit: state.trumpSuit,
     trumpTaken: state.trumpTaken,
@@ -58,7 +88,7 @@ function viewFor(
     turn: state.turn,
     mySeat: seat,
     myPoints: score(state, seat),
-    opponentPoints: score(state, other(seat)),
+    opponentPoints: score(state, nextSeat(seat, players)),
     trickNumber: state.trickNumber,
     deck,
     tricksLeft: tricksLeft(state),
@@ -73,17 +103,14 @@ function viewFor(
 function lastTrickFor(state: GameState, seat: Seat): PublicView['lastTrick'] {
   const t = state.lastTrick
   if (!t) return null
-  return {
-    plays: t.plays,
-    winner: t.winner,
-    iWon: t.winner === seat,
-    points: t.points,
-  }
+  return { plays: t.plays, winner: t.winner, iWon: t.winner === seat, points: t.points }
 }
+
+type ViewOpts = Parameters<typeof viewFor>[3]
 
 /** Shared plumbing for handler registration. */
 abstract class BaseSession implements Session {
-  abstract readonly mode: 'online' | 'ai' | 'hotseat'
+  abstract readonly mode: SessionMode
 
   protected viewHandlers: ((view: PublicView) => void)[] = []
   protected statusHandlers: ((status: SessionStatus) => void)[] = []
@@ -94,15 +121,12 @@ abstract class BaseSession implements Session {
   onView(handler: (view: PublicView) => void) {
     this.viewHandlers.push(handler)
   }
-
   onStatus(handler: (status: SessionStatus) => void) {
     this.statusHandlers.push(handler)
   }
-
   onReaction(handler: (emoji: Reaction) => void) {
     this.reactionHandlers.push(handler)
   }
-
   onSound(handler: (sound: SoundId) => void) {
     this.soundHandlers.push(handler)
   }
@@ -110,15 +134,12 @@ abstract class BaseSession implements Session {
   protected emit(view: PublicView) {
     for (const h of this.viewHandlers) h(view)
   }
-
   protected status(status: SessionStatus) {
     for (const h of this.statusHandlers) h(status)
   }
-
   protected emitReaction(emoji: Reaction) {
     for (const h of this.reactionHandlers) h(emoji)
   }
-
   protected emitSound(sound: SoundId) {
     for (const h of this.soundHandlers) h(sound)
   }
@@ -126,12 +147,9 @@ abstract class BaseSession implements Session {
   react(_emoji: Reaction) {
     // Only meaningful when there is another browser to send to.
   }
-
   sound(_sound: SoundId) {
     // Ditto — offline modes just play it locally.
   }
-
-  abstract setDeck(deck: DeckId): void
 
   /** setTimeout that gets cleaned up on leave(), so a torn-down session goes quiet. */
   protected later(fn: () => void, ms: number) {
@@ -144,6 +162,7 @@ abstract class BaseSession implements Session {
 
   abstract play(card: CardId): void
   abstract rematch(): void
+  abstract setDeck(deck: DeckId): void
 
   confirmHandoff() {
     /* only meaningful in hotseat */
@@ -160,55 +179,94 @@ abstract class BaseSession implements Session {
 }
 
 /**
- * Owns the authoritative GameState. Everything that actually advances a game
- * lives here; the online host, the AI game and the hotseat game all differ
- * only in who is allowed to move and who gets told about it.
+ * Owns the authoritative GameState and drives every seat that isn't a remote
+ * human: AI seats move on a timer, local seats wait for the UI.
+ *
+ * One class covers solo, hotseat and any mix of the two; the online host
+ * extends it with a transport.
  */
-abstract class AuthoritativeSession extends BaseSession {
+export class GameSession extends BaseSession {
+  readonly mode: SessionMode
   protected state: GameState
-  private dealer: Seat
+  protected seats: SeatConfig[]
   protected settings: MatchSettings
+  private dealer: Seat
+  private players: PlayerCount
+  /** Which local seat the board is currently drawn for. */
+  protected viewer: Seat
+  private awaitingHandoff = false
 
-  constructor(seed: number, dealer: Seat = 0, settings: MatchSettings = DEFAULT_SETTINGS) {
+  constructor(
+    seats: SeatConfig[],
+    seed: number = randomSeed(),
+    settings: MatchSettings = DEFAULT_SETTINGS,
+    dealer: Seat = 0,
+  ) {
     super()
-    this.dealer = dealer
+    this.seats = seats
+    this.players = seats.length as PlayerCount
     this.settings = settings
-    this.state = newGame(seed, dealer)
+    this.dealer = dealer
+    this.state = newGame(seed, dealer, this.players)
+    this.viewer = this.firstLocalSeat()
+    this.mode = seats.some(s => s.control === 'remote')
+      ? 'online'
+      : seats.filter(s => s.control === 'local').length > 1
+        ? 'hotseat'
+        : 'ai'
   }
 
-  /**
-   * Change the pace mid-lobby. Only the authoritative side has any say: it
-   * runs the timer that holds a finished trick on the table.
-   */
+  private firstLocalSeat(): Seat {
+    const i = this.seats.findIndex(s => s.control === 'local')
+    return i === -1 ? 0 : i
+  }
+
+  private localSeats(): Seat[] {
+    return this.seats.flatMap((s, i) => (s.control === 'local' ? [i] : []))
+  }
+
+  start() {
+    // Start on whoever leads if they are local, so the first turn is theirs.
+    if (this.seats[this.state.turn]?.control === 'local') this.viewer = this.state.turn
+    this.broadcast()
+    this.status({ kind: 'playing' })
+    this.advance()
+  }
+
+  protected broadcast(opts?: ViewOpts) {
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, opts))
+  }
+
   applySettings(next: MatchSettings) {
     this.settings = next
     this.broadcast()
   }
 
-  /** Deck is shared match state, so changing it re-renders both boards. */
+  /** Deck is shared match state, so changing it re-renders every board. */
   setDeck(deck: DeckId) {
     this.settings = { ...this.settings, deck }
     this.broadcast()
   }
 
-  /** Push the current state out to whoever needs to see it. */
-  protected abstract broadcast(opts?: Parameters<typeof viewFor>[3]): void
-
-  /** Called after a trick has been swept and it is someone's turn again. */
-  protected abstract afterTrick(): void
+  play(card: CardId) {
+    if (this.awaitingHandoff) return
+    const seat = this.state.turn
+    if (this.seats[seat]?.control !== 'local') return
+    // In hotseat the viewer is whoever's turn it is, so this is the same seat.
+    this.applyMove(seat, card)
+  }
 
   protected applyMove(seat: Seat, card: CardId): boolean {
     if (this.state.phase === 'over') return false
     if (this.state.turn !== seat) return false
     if (!this.state.hands[seat]?.some(c => c.id === card)) return false
 
-    const before = this.state
-    const { state, trick } = play(before, seat, card)
+    const { state, trick } = play(this.state, seat, card)
     this.state = state
 
     if (!trick) {
       this.broadcast()
-      this.onMoved()
+      this.advance()
       return true
     }
 
@@ -222,103 +280,43 @@ abstract class AuthoritativeSession extends BaseSession {
 
     this.later(() => {
       this.broadcast()
-      if (this.state.phase === 'playing') this.afterTrick()
+      if (this.state.phase === 'playing') this.advance()
     }, this.settings.trickDelayMs)
 
     return true
   }
 
-  /** Hook: a card was played but the trick is still open. */
-  protected onMoved() {}
-  /** Hook: a trick just resolved. */
-  protected onTrickResolved(_trick: TrickSummary) {}
-
-  rematch() {
-    // Alternate the deal, as you would across the table.
-    this.dealer = other(this.dealer)
-    this.state = newGame(randomSeed(), this.dealer)
-    this.broadcast()
-    this.afterTrick()
-  }
-}
-
-/** Solo play against the heuristic AI. The human is always seat 0. */
-export class AiSession extends AuthoritativeSession {
-  readonly mode = 'ai' as const
-  private static readonly HUMAN: Seat = 0
-  private static readonly BOT: Seat = 1
-
-  start() {
-    this.broadcast()
-    this.status({ kind: 'playing' })
-    this.maybeMoveBot()
-  }
-
-  protected broadcast(opts?: Parameters<typeof viewFor>[3]) {
-    this.emit(viewFor(this.state, AiSession.HUMAN, this.settings.deck, opts))
-  }
-
-  play(card: CardId) {
-    if (this.applyMove(AiSession.HUMAN, card)) this.maybeMoveBot()
-  }
-
-  protected override onMoved() {
-    this.maybeMoveBot()
-  }
-
-  protected afterTrick() {
-    this.maybeMoveBot()
-  }
-
-  private maybeMoveBot() {
-    if (this.state.phase !== 'playing' || this.state.turn !== AiSession.BOT) return
-    this.later(() => {
-      if (this.state.phase !== 'playing' || this.state.turn !== AiSession.BOT) return
-      this.applyMove(AiSession.BOT, chooseCard(this.state, AiSession.BOT).id)
-    }, AI_THINK_MS)
-  }
-
-  override rematch() {
-    super.rematch()
-    this.status({ kind: 'playing' })
-  }
-}
-
-/** Two players sharing one device, with a handoff screen between turns. */
-export class HotseatSession extends AuthoritativeSession {
-  readonly mode = 'hotseat' as const
-  /** Whose eyes the board is currently rendered for. */
-  private viewer: Seat = 0
-  private awaitingHandoff = false
-
-  start() {
-    this.viewer = this.state.turn
-    this.broadcast()
-    this.status({ kind: 'playing' })
-  }
-
-  protected broadcast(opts?: Parameters<typeof viewFor>[3]) {
-    this.emit(viewFor(this.state, this.viewer, this.settings.deck, opts))
-  }
-
-  play(card: CardId) {
-    if (this.awaitingHandoff) return
-    this.applyMove(this.viewer, card)
-  }
-
-  protected override onMoved() {
-    this.requestHandoff()
-  }
-
-  protected afterTrick() {
-    this.requestHandoff()
-  }
-
-  private requestHandoff() {
+  /**
+   * Hands the turn to whoever owns it: schedule an AI move, ask for the device
+   * to be passed, or simply wait for a local or remote human.
+   */
+  protected advance() {
     if (this.state.phase !== 'playing') return
-    if (this.state.turn === this.viewer) return
-    this.awaitingHandoff = true
-    this.status({ kind: 'handoff', seat: this.state.turn })
+    const seat = this.state.turn
+    const control = this.seats[seat]?.control
+
+    if (control === 'ai') {
+      this.later(() => {
+        if (this.state.phase !== 'playing') return
+        if (this.seats[this.state.turn]?.control !== 'ai') return
+        const s = this.state.turn
+        this.applyMove(s, chooseCard(this.state, s).id)
+      }, AI_THINK_MS)
+      return
+    }
+
+    if (control === 'local' && seat !== this.viewer && this.localSeats().length > 1) {
+      // More than one person on this device: hide the board until they swap.
+      this.awaitingHandoff = true
+      this.status({ kind: 'handoff', seat })
+      return
+    }
+
+    if (control === 'local' && seat !== this.viewer) {
+      // Single local player whose seat changed (shouldn't normally happen).
+      this.viewer = seat
+      this.broadcast()
+    }
   }
 
   override confirmHandoff() {
@@ -329,29 +327,36 @@ export class HotseatSession extends AuthoritativeSession {
     this.status({ kind: 'playing' })
   }
 
-  override rematch() {
+  /** Hook: a trick just resolved. The host relays it. */
+  protected onTrickResolved(_trick: TrickSummary) {}
+
+  rematch() {
+    // Move the deal round the table, as you would in person.
     this.awaitingHandoff = false
-    super.rematch()
-    this.viewer = this.state.turn
+    this.dealer = nextSeat(this.dealer, this.players)
+    this.state = newGame(randomSeed(), this.dealer, this.players)
+    if (this.seats[this.state.turn]?.control === 'local') this.viewer = this.state.turn
     this.broadcast()
     this.status({ kind: 'playing' })
+    this.advance()
   }
 }
 
 /**
- * Online host. Seat 0, holds the real state, and feeds the guest a redacted
+ * Online host. Holds the real state and feeds each remote seat a redacted
  * view of it.
  *
  * The host's browser necessarily knows the whole deck, so a modified client
  * could cheat. That is an accepted trade for having no server; see the README.
  */
-export class HostSession extends AuthoritativeSession {
-  readonly mode = 'online' as const
-  private static readonly HOST: Seat = 0
-  private static readonly GUEST: Seat = 1
-
-  constructor(private transport: Transport, seed: number, settings?: MatchSettings) {
-    super(seed, 0, settings)
+export class HostSession extends GameSession {
+  constructor(
+    private transport: Transport,
+    seed: number = randomSeed(),
+    settings: MatchSettings = DEFAULT_SETTINGS,
+    seats: SeatConfig[] = [{ control: 'local' }, { control: 'remote' }],
+  ) {
+    super(seats, seed, settings, 0)
 
     transport.onMessage(msg => this.receive(msg))
     transport.onPeerJoin(() => {
@@ -363,24 +368,24 @@ export class HostSession extends AuthoritativeSession {
     })
   }
 
-  start() {
+  override start() {
     this.broadcast()
     this.status(this.transport.isConnected() ? { kind: 'playing' } : { kind: 'waiting' })
+    this.advance()
   }
 
-  protected broadcast(opts?: Parameters<typeof viewFor>[3]) {
-    this.emit(viewFor(this.state, HostSession.HOST, this.settings.deck, opts))
-    this.send({ t: 'view', view: viewFor(this.state, HostSession.GUEST, this.settings.deck, opts) })
+  protected override broadcast(opts?: ViewOpts) {
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, opts))
+    // Every remote seat gets its own view. Phase 4 targets these per peer;
+    // with a single remote seat a broadcast reaches exactly the right browser.
+    this.seats.forEach((seat, i) => {
+      if (seat.control !== 'remote') return
+      this.send({ t: 'view', view: viewFor(this.state, i, this.settings.deck, opts) })
+    })
   }
 
   protected override onTrickResolved(trick: TrickSummary) {
     this.send({ t: 'trick', trick })
-  }
-
-  protected afterTrick() {}
-
-  play(card: CardId) {
-    this.applyMove(HostSession.HOST, card)
   }
 
   private receive(msg: NetMsg) {
@@ -390,12 +395,14 @@ export class HostSession extends AuthoritativeSession {
         // The guest is ready to render; re-send state. Also covers a reconnect.
         this.broadcast()
         break
-      case 'play':
-        if (!this.applyMove(HostSession.GUEST, m.card)) {
+      case 'play': {
+        const seat = this.remoteSeatToMove()
+        if (seat === null || !this.applyMove(seat, m.card)) {
           this.send({ t: 'error', message: 'Mossa non valida' })
           this.broadcast()
         }
         break
+      }
       case 'rematch':
         this.rematch()
         break
@@ -413,6 +420,18 @@ export class HostSession extends AuthoritativeSession {
         if (isDeckId(m.deck)) this.setDeck(m.deck)
         break
     }
+  }
+
+  /**
+   * Which seat a `play` from the wire belongs to.
+   *
+   * With one remote seat this is unambiguous: it can only be a move for the
+   * seat whose turn it is, and only if that seat is remote. Phase 4 replaces
+   * this with a peer-id lookup once several remotes can be connected at once.
+   */
+  private remoteSeatToMove(): Seat | null {
+    const seat = this.state.turn
+    return this.seats[seat]?.control === 'remote' ? seat : null
   }
 
   override react(emoji: Reaction) {
@@ -495,3 +514,23 @@ export class GuestSession extends BaseSession {
     this.transport.leave()
   }
 }
+
+// --- convenience constructors ------------------------------------------------
+
+/** Solo play: seat 0 is you, the rest are bots. */
+export function aiSession(settings: MatchSettings, players: PlayerCount = 2): GameSession {
+  const seats: SeatConfig[] = [{ control: 'local' }]
+  for (let i = 1; i < players; i++) seats.push({ control: 'ai' })
+  return new GameSession(seats, randomSeed(), settings)
+}
+
+/** Everyone on one device, passing it round. */
+export function hotseatSession(settings: MatchSettings, players: PlayerCount = 2): GameSession {
+  return new GameSession(
+    Array.from({ length: players }, () => ({ control: 'local' as const })),
+    randomSeed(),
+    settings,
+  )
+}
+
+export { other }
