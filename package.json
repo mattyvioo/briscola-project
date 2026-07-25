@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "assets": "node scripts/fetch-cards.mjs"
+    "assets": "node scripts/fetch-cards.mjs",
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "@trystero-p2p/mqtt": "^0.25.3"
