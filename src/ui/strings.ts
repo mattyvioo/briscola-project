@@ -1,0 +1,129 @@
+/**
+ * All user-facing copy. Italian is the default — it is an Italian game — with
+ * an English map alongside, so switching the whole UI is a one-line change to
+ * `LANG` below.
+ */
+
+const it = {
+  appTitle: 'Briscola',
+  tagline: 'Uno contro uno, direttamente tra i due browser.',
+
+  playOnline: 'Gioca online',
+  playAi: 'Contro il computer',
+  playHotseat: 'Due giocatori',
+  playOnlineHint: 'Crea una partita e invita un amico con un codice',
+  playAiHint: 'Allenati contro l’avversario automatico',
+  playHotseatHint: 'Sullo stesso dispositivo, a turno',
+
+  createRoom: 'Crea partita',
+  joinRoom: 'Entra con codice',
+  roomCodeLabel: 'Codice partita',
+  roomCodePlaceholder: 'ABC234',
+  yourCode: 'Il tuo codice',
+  shareCode: 'Condividi questo codice con il tuo avversario',
+  copy: 'Copia',
+  copied: 'Copiato',
+  join: 'Entra',
+  back: 'Indietro',
+  invalidCode: 'Codice non valido',
+  connecting: 'Connessione in corso…',
+  waitingOpponent: 'In attesa dell’avversario…',
+  opponentLeft: 'L’avversario si è disconnesso',
+
+  you: 'Tu',
+  opponent: 'Avversario',
+  player: (n: number) => `Giocatore ${n}`,
+  yourTurn: 'Tocca a te',
+  opponentTurn: 'Tocca all’avversario',
+  points: 'Punti',
+  briscola: 'Briscola',
+  deck: 'Mazzo',
+  cardsLeft: (n: number) => (n === 1 ? '1 carta' : `${n} carte`),
+  lastCards: 'Ultime mani',
+
+  handoffTitle: 'Passa il dispositivo',
+  handoffBody: (n: number) => `Tocca a Giocatore ${n}`,
+  handoffAction: 'Sono pronto',
+
+  youWin: 'Hai vinto!',
+  youLose: 'Hai perso',
+  draw: 'Pareggio',
+  playerWins: (n: number) => `Vince Giocatore ${n}`,
+  finalScore: 'Punteggio finale',
+  rematch: 'Rivincita',
+  leave: 'Esci',
+
+  rulesTitle: 'Regole in breve',
+  rules: [
+    'Mazzo da 40 carte. Vince chi supera i 60 punti su 120.',
+    'Ordine di presa: Asso, 3, Re, Cavallo, Fante, 7, 6, 5, 4, 2.',
+    'Punti: Asso 11, Tre 10, Re 4, Cavallo 3, Fante 2. Le altre valgono 0.',
+    'Non c’è obbligo di rispondere al seme: puoi giocare qualsiasi carta.',
+    'La briscola batte ogni altro seme. A parità di seme vince la carta più alta.',
+    'Chi vince la mano pesca per primo e gioca la mano successiva.',
+  ],
+}
+
+const en: typeof it = {
+  appTitle: 'Briscola',
+  tagline: 'One on one, straight between the two browsers.',
+
+  playOnline: 'Play online',
+  playAi: 'Play the computer',
+  playHotseat: 'Two players',
+  playOnlineHint: 'Create a game and invite a friend with a code',
+  playAiHint: 'Practise against the built-in opponent',
+  playHotseatHint: 'Same device, taking turns',
+
+  createRoom: 'Create game',
+  joinRoom: 'Join with code',
+  roomCodeLabel: 'Game code',
+  roomCodePlaceholder: 'ABC234',
+  yourCode: 'Your code',
+  shareCode: 'Share this code with your opponent',
+  copy: 'Copy',
+  copied: 'Copied',
+  join: 'Join',
+  back: 'Back',
+  invalidCode: 'Invalid code',
+  connecting: 'Connecting…',
+  waitingOpponent: 'Waiting for opponent…',
+  opponentLeft: 'Your opponent disconnected',
+
+  you: 'You',
+  opponent: 'Opponent',
+  player: (n: number) => `Player ${n}`,
+  yourTurn: 'Your turn',
+  opponentTurn: 'Opponent’s turn',
+  points: 'Points',
+  briscola: 'Trump',
+  deck: 'Deck',
+  cardsLeft: (n: number) => (n === 1 ? '1 card' : `${n} cards`),
+  lastCards: 'Final tricks',
+
+  handoffTitle: 'Pass the device',
+  handoffBody: (n: number) => `Player ${n}'s turn`,
+  handoffAction: 'I’m ready',
+
+  youWin: 'You win!',
+  youLose: 'You lose',
+  draw: 'Draw',
+  playerWins: (n: number) => `Player ${n} wins`,
+  finalScore: 'Final score',
+  rematch: 'Rematch',
+  leave: 'Leave',
+
+  rulesTitle: 'Rules at a glance',
+  rules: [
+    '40-card deck. Take more than 60 of the 120 points to win.',
+    'Trick order: Ace, 3, King, Knight, Jack, 7, 6, 5, 4, 2.',
+    'Points: Ace 11, Three 10, King 4, Knight 3, Jack 2. Everything else 0.',
+    'No obligation to follow suit — you may play any card.',
+    'Trump beats any other suit. Within a suit, the stronger card wins.',
+    'The winner of a trick draws first and leads the next one.',
+  ],
+}
+
+const LANG: 'it' | 'en' = 'it'
+
+export const t = LANG === 'it' ? it : en

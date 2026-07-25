@@ -1,0 +1,23 @@
+{
+  "name": "briscola",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "assets": "node scripts/fetch-cards.mjs"
+  },
+  "dependencies": {
+    "@trystero-p2p/mqtt": "^0.25.3"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}

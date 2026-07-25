@@ -1,0 +1,667 @@
+/* ---------------------------------------------------------------------------
+   Briscola — mobile-first stylesheet.
+
+   Everything is sized off a single custom property, --card-w. Set that, and
+   the hands, stock, table and gaps all follow. There is exactly one width
+   breakpoint (720px) plus a short-viewport rule for phone landscape, which is
+   the genuinely tight case.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* The one knob. clamp() means it scales smoothly instead of stepping. */
+  --card-w: clamp(58px, 17vw, 104px);
+  --card-ratio: 420 / 694;
+  --gap: clamp(6px, 2vw, 14px);
+
+  --felt: #0d4a2f;
+  --felt-deep: #072b1b;
+  --felt-edge: #0a3d27;
+  --ink: #f4f1e8;
+  --ink-muted: #a9bdb0;
+  --gold: #e0b64a;
+  --gold-dim: #a8843180;
+  --danger: #c9524a;
+  --panel-bg: #10281dee;
+  --radius: 10px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: radial-gradient(ellipse at 50% 0%, var(--felt) 0%, var(--felt-deep) 75%);
+  color: var(--ink);
+  font-family: ui-rounded, 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* Kill the double-tap-to-zoom delay and long-press callouts on cards. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  /* dvh, not vh: mobile browser chrome collapses on scroll and vh would
+     leave the bottom of the layout cut off. */
+  min-height: 100dvh;
+}
+
+/* --- shared bits ---------------------------------------------------------- */
+
+.muted {
+  color: var(--ink-muted);
+}
+.small {
+  font-size: 0.8rem;
+}
+
+.btn,
+.menu-item,
+.card-playable {
+  font: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+.btn {
+  min-height: 44px; /* comfortable touch target */
+  padding: 0.7rem 1.4rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  transition: transform 0.12s ease, background-color 0.15s ease;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--gold);
+  color: #241a05;
+}
+.btn-ghost {
+  background: #ffffff14;
+  color: var(--ink);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  letter-spacing: 0.22em;
+  font-weight: 700;
+}
+.code-lg {
+  font-size: clamp(1.8rem, 9vw, 2.6rem);
+  color: var(--gold);
+  background: #00000038;
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.4rem 0.6rem 0.62rem; /* nudge for the letter-spacing tail */
+  text-align: center;
+  user-select: all;
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  margin: 0.4rem auto 0;
+  border: 3px solid #ffffff26;
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- menu ----------------------------------------------------------------- */
+
+.screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  padding: max(1.1rem, env(safe-area-inset-top)) max(1.1rem, env(safe-area-inset-right))
+    max(1.1rem, env(safe-area-inset-bottom)) max(1.1rem, env(safe-area-inset-left));
+  max-width: 34rem;
+  margin-inline: auto;
+  width: 100%;
+}
+
+.screen-menu {
+  justify-content: center;
+}
+
+.masthead {
+  text-align: center;
+}
+.title {
+  font-size: clamp(2.4rem, 13vw, 3.6rem);
+  margin: 0 0 0.2rem;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+}
+.masthead p {
+  margin: 0;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-align: left;
+  width: 100%;
+  min-height: 60px;
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius);
+  background: #ffffff12;
+  border: 1px solid #ffffff1a;
+  transition: background-color 0.15s ease, transform 0.12s ease;
+}
+.menu-item:active {
+  transform: scale(0.99);
+}
+.menu-primary {
+  background: var(--gold);
+  color: #241a05;
+  border-color: transparent;
+}
+.menu-primary .menu-hint {
+  color: #241a05b8;
+}
+.menu-label {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.menu-hint {
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius);
+  background: #ffffff0a;
+  border: 1px solid #ffffff1a;
+}
+.field-label {
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.join-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.code-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 1.15rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--ink);
+  background: #00000038;
+  border: 1px solid #ffffff26;
+  border-radius: var(--radius);
+  padding: 0.5rem;
+}
+.code-input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.rules {
+  background: #ffffff0a;
+  border: 1px solid #ffffff1a;
+  border-radius: var(--radius);
+  padding: 0.7rem 1.1rem;
+  font-size: 0.85rem;
+}
+.rules summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+}
+.rules ul {
+  margin: 0.6rem 0 0.2rem;
+  padding-left: 1.1rem;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+/* --- lobby ---------------------------------------------------------------- */
+
+.screen-lobby {
+  justify-content: center;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.4rem 1.2rem;
+  border-radius: 14px;
+  background: var(--panel-bg);
+  border: 1px solid #ffffff1f;
+  backdrop-filter: blur(7px);
+  text-align: center;
+  box-shadow: 0 18px 50px #00000059;
+}
+.panel h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+.panel p {
+  margin: 0;
+}
+.panel-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.panel-actions .btn {
+  flex: 1 1 8rem;
+}
+
+/* --- the table ------------------------------------------------------------ */
+
+.table {
+  position: relative;
+  height: 100dvh;
+  /* The board row is the only flexible one; everything else is content-sized,
+     so the hand never gets pushed off the bottom of a short viewport. */
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  gap: var(--gap);
+  padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
+    max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+  overflow: hidden; /* the table never scrolls */
+}
+
+.hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.score {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: #00000047;
+  border: 1px solid #ffffff1a;
+}
+.score-name {
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.score-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+}
+.btn-leave {
+  padding: 0.35rem 0.8rem;
+  min-height: 36px;
+  font-size: 0.82rem;
+  border-radius: 999px;
+}
+
+/* Hands ------------------------------------------------------------------- */
+
+.hand {
+  display: flex;
+  justify-content: center;
+  gap: var(--gap);
+  min-height: calc(var(--card-w) / (var(--card-ratio)));
+}
+
+.hand-opponent {
+  /* Face-down cards overlap slightly — they carry no information, so they can
+     give their space to the board. */
+  gap: 0;
+}
+.hand-opponent .card + .card {
+  margin-left: calc(var(--card-w) * -0.42);
+}
+
+.card {
+  width: var(--card-w);
+  aspect-ratio: var(--card-ratio);
+  border-radius: calc(var(--card-w) * 0.07);
+  background: #fdfcf7;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 2px 5px #00000059, 0 0 0 1px #00000026;
+  flex: none;
+  display: block;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.card-back {
+  background: #7a1f1f;
+}
+
+/* Playable cards get a real touch target even when the art is small. */
+.card-playable {
+  position: relative;
+  min-width: 44px;
+  min-height: 44px;
+}
+.card-playable::after {
+  /* Invisible padding so a thumb landing just outside the card still hits. */
+  content: '';
+  position: absolute;
+  inset: -6px -3px;
+}
+.card-playable:not(.is-disabled) {
+  cursor: pointer;
+}
+.card-playable.is-disabled {
+  cursor: default;
+  filter: brightness(0.82) saturate(0.8);
+}
+.hand-active .card-playable:not(.is-disabled) {
+  box-shadow: 0 2px 5px #00000059, 0 0 0 1px #00000026, 0 0 0 2px var(--gold);
+}
+.card-playable:active:not(.is-disabled) {
+  transform: translateY(-8px) scale(1.03);
+}
+.card-playable:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Lift on hover only where hover actually exists — on touch this would stick. */
+@media (hover: hover) {
+  .card-playable:not(.is-disabled):hover {
+    transform: translateY(-10px);
+    box-shadow: 0 10px 18px #00000066, 0 0 0 2px var(--gold);
+  }
+}
+
+/* Board: stock on the left, trick centred in what remains ------------------ */
+
+.board {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gap);
+  min-height: 0;
+}
+
+.stock {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* The trump card lies crosswise, so this column is as wide as a card is tall. */
+  width: calc(var(--card-w) / (var(--card-ratio)));
+  height: calc(var(--card-w) / (var(--card-ratio)));
+  justify-content: center;
+}
+.stock-empty {
+  width: 0;
+}
+
+/* Both the crosswise briscola and the deck sit dead-centre in .stock, whose
+   box is exactly one card-height square. Centring on the box (rather than
+   offsetting from its left edge) is what keeps the rotated trump from hanging
+   off the side of the screen on narrow viewports. */
+.trump,
+.deck {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+}
+.trump {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+.trump .card {
+  box-shadow: 0 3px 8px #00000073;
+}
+
+.deck {
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 3px 6px #00000073);
+}
+.deck-count {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  min-width: 22px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #241a05;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.trick {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(var(--card-w) / (var(--card-ratio)) * 1.2);
+}
+.played {
+  animation: play-in 0.22s ease-out;
+}
+.played-theirs {
+  transform: translate(calc(var(--card-w) * -0.22), calc(var(--card-w) * -0.14)) rotate(-5deg);
+}
+.played-mine {
+  transform: translate(calc(var(--card-w) * 0.22), calc(var(--card-w) * 0.14)) rotate(4deg);
+  z-index: 2;
+}
+.played-winner .card {
+  box-shadow: 0 0 0 3px var(--gold), 0 8px 20px #00000073;
+}
+.trick-resolving .played:not(.played-winner) {
+  opacity: 0.7;
+}
+
+@keyframes play-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+}
+
+.banner {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  min-height: 1.2em;
+  letter-spacing: 0.04em;
+}
+.banner-active {
+  color: var(--gold);
+}
+
+/* Overlays ---------------------------------------------------------------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2rem;
+  background: #04150dcc;
+  backdrop-filter: blur(3px);
+  z-index: 10;
+}
+.overlay[hidden] {
+  display: none;
+}
+.overlay .panel {
+  width: min(24rem, 100%);
+  animation: panel-in 0.2s ease-out;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+
+.final-score {
+  display: flex;
+  /* Align on the bottom edge so the dash lines up with the numerals rather
+     than floating between them and the labels above. */
+  align-items: end;
+  justify-content: center;
+  gap: 0.9rem;
+}
+.final-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.final-side strong {
+  font-size: 2rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.final-sep {
+  color: var(--ink-muted);
+  font-size: 1.4rem;
+  line-height: 1.6;
+}
+.panel-result.is-win h2 {
+  color: var(--gold);
+}
+.panel-result.is-loss h2 {
+  color: var(--danger);
+}
+
+/* --- roomier viewports ---------------------------------------------------- */
+
+/* The height condition matters: a phone in landscape is wider than 720px but
+   has nowhere near the vertical room for desktop-sized cards. */
+@media (min-width: 720px) and (min-height: 560px) {
+  :root {
+    --card-w: clamp(88px, 9vw, 118px);
+    --gap: 16px;
+  }
+  .table {
+    max-width: 56rem;
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+  }
+  .hand-opponent .card + .card {
+    margin-left: calc(var(--card-w) * -0.3);
+  }
+  .banner {
+    font-size: 1rem;
+  }
+}
+
+/* --- phone landscape: the tight case --------------------------------------
+   Last on purpose. Height, not width, is the scarce resource here, so the
+   card scale is driven off vh and this block must win over anything above. */
+
+@media (orientation: landscape) and (max-height: 559px) {
+  :root {
+    --card-w: clamp(42px, 11.5vh, 76px);
+    --gap: 5px;
+  }
+  .table {
+    gap: 4px;
+    max-width: none;
+    padding-inline: max(0.5rem, env(safe-area-inset-left));
+  }
+  .hand-opponent .card + .card {
+    margin-left: calc(var(--card-w) * -0.55);
+  }
+  .banner {
+    font-size: 0.75rem;
+    min-height: 1em;
+  }
+  .score {
+    padding: 0.15rem 0.55rem;
+  }
+  .score-name {
+    font-size: 0.62rem;
+  }
+  .btn-leave {
+    min-height: 30px;
+    padding: 0.2rem 0.7rem;
+  }
+  .panel {
+    padding: 0.8rem 1rem;
+    gap: 0.4rem;
+  }
+  .panel h2 {
+    font-size: 1.1rem;
+  }
+  .final-side strong {
+    font-size: 1.4rem;
+  }
+  .spinner {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* --- reduced motion ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
