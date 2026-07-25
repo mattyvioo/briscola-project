@@ -68,11 +68,26 @@ function main() {
     for (const key of ['user.name', 'user.email']) {
       run('git', ['config', key, capture('git', ['config', key])], staging)
     }
+    run('git', ['remote', 'add', 'origin', origin], staging)
+
+    // Build on top of the existing branch rather than force-pushing a fresh
+    // root commit. A rewritten history makes GitHub Pages treat every file as
+    // new on every deploy, and the push stays a plain fast-forward.
+    let onTopOfExisting = false
+    try {
+      execFileSync('git', ['fetch', '-q', '--depth=1', 'origin', BRANCH], {
+        cwd: staging,
+        stdio: 'pipe',
+      })
+      run('git', ['reset', '--soft', 'FETCH_HEAD'], staging)
+      onTopOfExisting = true
+    } catch {
+      // First deploy: no remote branch yet, so an orphan commit is correct.
+    }
 
     run('git', ['add', '-A'], staging)
     run('git', ['commit', '-q', '-m', `Deploy ${sha}`], staging)
-    run('git', ['remote', 'add', 'origin', origin], staging)
-    run('git', ['push', '-f', '-q', 'origin', BRANCH], staging)
+    run('git', ['push', '-q', ...(onTopOfExisting ? [] : ['-f']), 'origin', BRANCH], staging)
 
     console.log(`\n✓ Deployed ${sha} → ${BRANCH}`)
     console.log('  https://mattyvioo.github.io/briscola-project/')
