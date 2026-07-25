@@ -983,3 +983,8 @@ body {
   font-size: 1.05rem;
   line-height: 1;
 }
+
+/* Winning card in the previous-trick recap. */
+.mini-won .card {
+  box-shadow: 0 0 0 2px var(--gold), 0 1px 3px #00000059;
+}

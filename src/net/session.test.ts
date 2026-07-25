@@ -108,9 +108,8 @@ describe('public view', () => {
 
     const last = views.at(-1)!.lastTrick!
     expect(last).not.toBeNull()
-    // The viewer is now the trick winner, so "mine" must be one of the two
-    // cards actually played, and the pair must be exactly those two.
-    expect([last.mine.id, last.theirs.id].sort()).toEqual([lead.id, follow.id].sort())
+    // The recap must contain exactly the two cards actually played.
+    expect(last.plays.map(p => p.card.id).sort()).toEqual([lead.id, follow.id].sort())
     expect(last.points).toBeLessThanOrEqual(TOTAL_POINTS)
   })
 

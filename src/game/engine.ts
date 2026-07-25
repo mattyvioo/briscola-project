@@ -1,28 +1,36 @@
-import { freshDeck, totalPoints, type Card, type CardId, type Suit } from './deck'
+import { totalPoints, type Card, type CardId, type Suit } from './deck'
 import { mulberry32, shuffle } from './rng'
-import { other, outcomeFor, trickWinner, type Outcome, type Seat } from './rules'
+import {
+  nextSeat,
+  outcomeForTeam,
+  trickWinnerOf,
+  type Outcome,
+  type Play,
+  type Seat,
+} from './rules'
+import { buildDeck, HAND_SIZE, tableFor, teamOf, type PlayerCount, type TableConfig } from './table'
 
-export interface TableCard {
-  readonly seat: Seat
-  readonly card: Card
-}
+export type TableCard = Play
 
 export interface GameState {
   readonly seed: number
-  /** Cards in hand, per seat. */
-  readonly hands: readonly [readonly Card[], readonly Card[]]
+  readonly config: TableConfig
+  /** Cards in hand, indexed by seat. */
+  readonly hands: readonly (readonly Card[])[]
   /** Face-down stock. Cards are drawn from the end. */
   readonly stock: readonly Card[]
-  /** The face-up briscola, sitting half-under the stock. */
+  /** The face-up briscola, sitting beside the stock. */
   readonly trumpCard: Card
   readonly trumpSuit: Suit
-  /** Set once the trump card has been drawn (by the loser of trick 17). */
+  /** Set once the briscola itself has been drawn. */
   readonly trumpTaken: boolean
-  /** The led card, waiting for a response. Null between tricks. */
-  readonly table: TableCard | null
+  /** Cards played into the current trick, in play order. Empty between tricks. */
+  readonly table: readonly TableCard[]
   readonly turn: Seat
-  /** Captured cards, per seat. */
-  readonly piles: readonly [readonly Card[], readonly Card[]]
+  /** Who led the current trick. */
+  readonly leader: Seat
+  /** Captured cards, indexed by **team** rather than seat. */
+  readonly piles: readonly (readonly Card[])[]
   readonly trickNumber: number
   readonly phase: 'playing' | 'over'
   /** The trick just completed, kept so players can review what was played. */
@@ -31,8 +39,7 @@ export interface GameState {
 
 export interface CompletedTrick {
   readonly leader: Seat
-  readonly leadCard: Card
-  readonly followCard: Card
+  readonly plays: readonly TableCard[]
   readonly winner: Seat
   readonly points: number
 }
@@ -51,49 +58,57 @@ export interface PlayResult {
 /**
  * Deals a new game.
  *
- * 3 cards each, the 7th turned face up as the briscola, 33 left in the stock.
- * The non-dealer leads.
+ * 3 cards to each seat, the next card turned face up as the briscola, the rest
+ * face down as stock. The player to the dealer's left leads.
  */
-export function newGame(seed: number, dealer: Seat = 0): GameState {
-  const deck = shuffle(freshDeck(), mulberry32(seed))
+export function newGame(seed: number, dealer: Seat = 0, players: PlayerCount = 2): GameState {
+  const config = tableFor(players)
+  const deck = shuffle(buildDeck(config), mulberry32(seed))
 
-  const handA = deck.slice(0, 3)
-  const handB = deck.slice(3, 6)
-  const trumpCard = deck[6]!
-  // Stock is drawn from the end, so reverse: deck[7] should come off first.
-  const stock = deck.slice(7).reverse()
+  const hands: Card[][] = []
+  for (let i = 0; i < config.players; i++) {
+    hands.push(deck.slice(i * HAND_SIZE, (i + 1) * HAND_SIZE))
+  }
 
-  const leader = other(dealer)
-  const hands: [Card[], Card[]] = dealer === 0 ? [handA, handB] : [handB, handA]
+  const dealt = config.players * HAND_SIZE
+  const trumpCard = deck[dealt]!
+  // Stock is drawn from the end, so reverse: deck[dealt + 1] comes off first.
+  const stock = deck.slice(dealt + 1).reverse()
+
+  // Deal so that the seat holding the first packet is the one who leads.
+  const leader = nextSeat(dealer, config.players)
+  const rotated: Card[][] = []
+  for (let i = 0; i < config.players; i++) {
+    rotated[(leader + i) % config.players] = hands[i]!
+  }
 
   return {
     seed,
-    hands,
+    config,
+    hands: rotated,
     stock,
     trumpCard,
     trumpSuit: trumpCard.suit,
     trumpTaken: false,
-    table: null,
+    table: [],
     turn: leader,
-    piles: [[], []],
+    leader,
+    piles: config.teams.map(() => []),
     trickNumber: 1,
     phase: 'playing',
     lastTrick: null,
   }
 }
 
-/** Tricks still to be played, counting the one in progress. A game has 20. */
-export const TRICKS_PER_GAME = 20
-
 export function tricksLeft(state: GameState): number {
   if (state.phase === 'over') return 0
-  return TRICKS_PER_GAME - state.trickNumber + 1
+  return state.config.tricks - state.trickNumber + 1
 }
 
 export function legalMoves(state: GameState, seat: Seat): readonly Card[] {
   // Briscola imposes no follow-suit obligation: every card in hand is legal.
   if (state.phase === 'over' || state.turn !== seat) return []
-  return state.hands[seat]
+  return state.hands[seat] ?? []
 }
 
 /**
@@ -107,56 +122,59 @@ export function play(state: GameState, seat: Seat, id: CardId): PlayResult {
   if (state.phase === 'over') throw new Error('Game is over')
   if (state.turn !== seat) throw new Error(`Not seat ${seat}'s turn`)
 
-  const hand = state.hands[seat]
+  const hand = state.hands[seat] ?? []
   const idx = hand.findIndex(c => c.id === id)
   if (idx === -1) throw new Error(`Seat ${seat} does not hold ${id}`)
   const card = hand[idx]!
 
-  const hands: [Card[], Card[]] = [state.hands[0].slice(), state.hands[1].slice()]
-  hands[seat].splice(idx, 1)
+  const hands = state.hands.map(h => h.slice())
+  hands[seat]!.splice(idx, 1)
 
-  // Leading: park the card on the table and pass the turn.
-  if (state.table === null) {
+  const table = [...state.table, { seat, card }]
+  const players = state.config.players
+
+  // Trick still open: pass the turn round the table.
+  if (table.length < players) {
     return {
-      state: { ...state, hands, table: { seat, card }, turn: other(seat) },
+      state: { ...state, hands, table, turn: nextSeat(seat, players) },
       trick: null,
     }
   }
 
-  // Following: resolve the trick.
-  const leader = state.table.seat
-  const leadCard = state.table.card
-  const winner = trickWinner(leadCard, card, state.trumpSuit) === 'lead' ? leader : seat
+  // Everyone has played — resolve.
+  const winner = trickWinnerOf(table, state.trumpSuit)
+  const winningTeam = teamOf(state.config, winner)
 
-  const piles: [Card[], Card[]] = [state.piles[0].slice(), state.piles[1].slice()]
-  piles[winner].push(leadCard, card)
+  const piles = state.piles.map(p => p.slice())
+  piles[winningTeam]!.push(...table.map(t => t.card))
 
-  // Winner draws first, then the loser. The loser of the trick that empties
-  // the stock is the one who picks up the face-up briscola.
+  // The winner draws first, then round the table in play order. The last card
+  // to go is the face-up briscola, so whoever draws last in the final round
+  // picks it up.
   const stock = state.stock.slice()
   let trumpTaken = state.trumpTaken
   const drawn: { seat: Seat; card: Card }[] = []
 
-  for (const s of [winner, other(winner)] as const) {
+  for (let i = 0; i < players; i++) {
+    const s = (winner + i) % players
     if (stock.length > 0) {
       const drawnCard = stock.pop()!
-      hands[s].push(drawnCard)
+      hands[s]!.push(drawnCard)
       drawn.push({ seat: s, card: drawnCard })
     } else if (!trumpTaken) {
       trumpTaken = true
-      hands[s].push(state.trumpCard)
+      hands[s]!.push(state.trumpCard)
       drawn.push({ seat: s, card: state.trumpCard })
     }
   }
 
-  const over = hands[0].length === 0 && hands[1].length === 0
+  const over = hands.every(h => h.length === 0)
 
   const completed: CompletedTrick = {
-    leader,
-    leadCard,
-    followCard: card,
+    leader: state.leader,
+    plays: table,
     winner,
-    points: totalPoints([leadCard, card]),
+    points: totalPoints(table.map(t => t.card)),
   }
 
   return {
@@ -166,8 +184,9 @@ export function play(state: GameState, seat: Seat, id: CardId): PlayResult {
       stock,
       trumpTaken,
       piles,
-      table: null,
+      table: [],
       turn: winner,
+      leader: winner,
       trickNumber: state.trickNumber + 1,
       phase: over ? 'over' : 'playing',
       lastTrick: completed,
@@ -176,12 +195,22 @@ export function play(state: GameState, seat: Seat, id: CardId): PlayResult {
   }
 }
 
+/** Points captured by a team. */
+export function teamScore(state: GameState, team: number): number {
+  return totalPoints(state.piles[team] ?? [])
+}
+
+/** Points captured by the team a seat plays for. */
 export function score(state: GameState, seat: Seat): number {
-  return totalPoints(state.piles[seat])
+  return teamScore(state, teamOf(state.config, seat))
+}
+
+export function allTeamScores(state: GameState): number[] {
+  return state.piles.map(p => totalPoints(p))
 }
 
 export function outcome(state: GameState, seat: Seat): Outcome {
-  return outcomeFor(score(state, seat))
+  return outcomeForTeam(state.config, allTeamScores(state), teamOf(state.config, seat))
 }
 
 /** Cards left to draw, counting the face-up briscola. */

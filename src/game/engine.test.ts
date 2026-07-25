@@ -66,7 +66,7 @@ describe('newGame', () => {
 
   it('uses all 40 cards exactly once', () => {
     const s = newGame(7)
-    const all = [...s.hands[0], ...s.hands[1], ...s.stock, s.trumpCard]
+    const all = [...s.hands[0]!, ...s.hands[1]!, ...s.stock, s.trumpCard]
     expect(all).toHaveLength(40)
     expect(new Set(all.map(x => x.id)).size).toBe(40)
   })
@@ -77,30 +77,31 @@ describe('newGame', () => {
   })
 
   it('is deterministic for a given seed', () => {
-    expect(newGame(99).hands[0].map(x => x.id)).toEqual(newGame(99).hands[0].map(x => x.id))
-    expect(newGame(99).hands[0].map(x => x.id)).not.toEqual(newGame(100).hands[0].map(x => x.id))
+    expect(newGame(99).hands[0]!.map(x => x.id)).toEqual(newGame(99).hands[0]!.map(x => x.id))
+    expect(newGame(99).hands[0]!.map(x => x.id)).not.toEqual(newGame(100).hands[0]!.map(x => x.id))
   })
 })
 
 describe('play', () => {
   it('rejects a card the player does not hold', () => {
     const s = newGame(5)
-    const notInHand = freshDeck().find(x => !s.hands[s.turn].some(h => h.id === x.id))!
+    const notInHand = freshDeck().find(x => !s.hands[s.turn]!.some(h => h.id === x.id))!
     expect(() => play(s, s.turn, notInHand.id)).toThrow(/does not hold/)
   })
 
   it('rejects a move out of turn', () => {
     const s = newGame(5)
     const wrong = other(s.turn)
-    expect(() => play(s, wrong, s.hands[wrong][0]!.id)).toThrow(/turn/)
+    expect(() => play(s, wrong, s.hands[wrong]![0]!.id)).toThrow(/turn/)
   })
 
   it('parks the led card and passes the turn', () => {
     const s = newGame(5)
     const leader = s.turn
-    const { state, trick } = play(s, leader, s.hands[leader][0]!.id)
+    const { state, trick } = play(s, leader, s.hands[leader]![0]!.id)
     expect(trick).toBeNull()
-    expect(state.table?.seat).toBe(leader)
+    expect(state.table).toHaveLength(1)
+    expect(state.table[0]!.seat).toBe(leader)
     expect(state.turn).toBe(other(leader))
     expect(state.hands[leader]).toHaveLength(2)
   })
@@ -108,14 +109,14 @@ describe('play', () => {
   it('awards the trick and refills both hands to 3', () => {
     let s = newGame(5)
     const leader = s.turn
-    s = play(s, leader, s.hands[leader][0]!.id).state
+    s = play(s, leader, s.hands[leader]![0]!.id).state
     const follower = s.turn
-    const res = play(s, follower, s.hands[follower][0]!.id)
+    const res = play(s, follower, s.hands[follower]![0]!.id)
 
     expect(res.trick).not.toBeNull()
-    expect(res.state.table).toBeNull()
+    expect(res.state.table).toHaveLength(0)
     expect(res.state.turn).toBe(res.trick!.winner)
-    expect(res.state.piles[res.trick!.winner]).toHaveLength(2)
+    expect(res.state.piles[res.trick!.winner]).toHaveLength(2) // 2p: team index == seat
     expect(res.state.hands[0]).toHaveLength(3)
     expect(res.state.hands[1]).toHaveLength(3)
     expect(res.state.stock).toHaveLength(31)
@@ -124,8 +125,8 @@ describe('play', () => {
   it('draws winner-first', () => {
     let s = newGame(11)
     const leader = s.turn
-    s = play(s, leader, s.hands[leader][0]!.id).state
-    const res = play(s, s.turn, s.hands[s.turn][0]!.id)
+    s = play(s, leader, s.hands[leader]![0]!.id).state
+    const res = play(s, s.turn, s.hands[s.turn]![0]!.id)
     expect(res.trick!.drawn[0]!.seat).toBe(res.trick!.winner)
     expect(res.trick!.drawn[1]!.seat).toBe(other(res.trick!.winner))
   })
@@ -142,7 +143,7 @@ function playOut(seed: number, dealer: Seat = 0) {
     const seat = s.turn
     const card = chooseCard(s, seat)
     // The AI must only ever pick from its own hand.
-    expect(s.hands[seat].some(x => x.id === card.id)).toBe(true)
+    expect(s.hands[seat]!.some(x => x.id === card.id)).toBe(true)
     const res = play(s, seat, card.id)
     s = res.state
     if (res.trick) tricks.push({ winner: res.trick.winner, states: s })
@@ -159,7 +160,7 @@ describe('a full game', () => {
   it('conserves all 120 points', () => {
     const { state } = playOut(2024)
     expect(score(state, 0) + score(state, 1)).toBe(TOTAL_POINTS)
-    expect(state.piles[0].length + state.piles[1].length).toBe(40)
+    expect(state.piles[0]!.length + state.piles[1]!.length).toBe(40)
   })
 
   it('empties the stock and hands out the trump card by the end', () => {
@@ -235,7 +236,7 @@ describe('fuzz: 1000 AI self-play games', () => {
       expect(score(state, 0) + score(state, 1), `seed ${seed}`).toBe(TOTAL_POINTS)
 
       // Every card accounted for, none duplicated.
-      const played: Card[] = [...state.piles[0], ...state.piles[1]]
+      const played: Card[] = [...state.piles[0]!, ...state.piles[1]!]
       expect(new Set(played.map(x => x.id)).size, `seed ${seed}`).toBe(40)
     }
   })

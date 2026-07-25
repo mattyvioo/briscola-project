@@ -31,12 +31,13 @@ export interface PublicView {
   /** Tricks still to play, including the one in progress. Counts down from 20. */
   readonly tricksLeft: number
   /**
-   * The previous trick, from this seat's point of view, so a player can check
-   * what was just played. Only ever the most recent one.
+   * The previous trick, so a player can check what was just played. Only ever
+   * the most recent one. Carries every play with its seat, so the same shape
+   * works at a 2, 3 or 4 player table.
    */
   readonly lastTrick: {
-    readonly mine: Card
-    readonly theirs: Card
+    readonly plays: readonly { readonly seat: Seat; readonly card: Card }[]
+    readonly winner: Seat
     readonly iWon: boolean
     readonly points: number
   } | null
@@ -58,8 +59,7 @@ export interface PublicView {
 }
 
 export interface TrickSummary {
-  readonly leadCard: CardId
-  readonly followCard: CardId
+  readonly plays: readonly CardId[]
   readonly winner: Seat
   readonly points: number
 }

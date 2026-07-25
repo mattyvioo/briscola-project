@@ -400,8 +400,11 @@ export class TableView {
         el(
           'div',
           { class: 'last-trick-cards' },
-          this.miniCard(last.theirs, t.opponent),
-          this.miniCard(last.mine, t.you),
+          // Shown in play order, with the winning card marked, so the recap
+          // reads the same way at a 2, 3 or 4 player table.
+          ...last.plays.map(p =>
+            this.miniCard(p.card, p.seat === view.mySeat ? t.you : t.opponent, p.seat === last.winner),
+          ),
         ),
         el('span', {
           class: 'last-trick-result',
@@ -411,10 +414,10 @@ export class TableView {
     )
   }
 
-  private miniCard(card: Card, who: string): HTMLElement {
+  private miniCard(card: Card, who: string, won = false): HTMLElement {
     return el(
       'div',
-      { class: 'mini' },
+      { class: `mini${won ? ' mini-won' : ''}` },
       cardFace(card, { deck: this.deck }),
       el('span', { class: 'mini-who', text: who }),
     )

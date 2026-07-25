@@ -48,13 +48,13 @@ function viewFor(
   opts: { table?: PublicView['table']; resolving?: boolean; lastWinner?: Seat | null } = {},
 ): PublicView {
   return {
-    hand: state.hands[seat],
-    opponentCards: state.hands[other(seat)].length,
+    hand: state.hands[seat] ?? [],
+    opponentCards: state.hands[other(seat)]?.length ?? 0,
     trumpCard: state.trumpCard,
     trumpSuit: state.trumpSuit,
     trumpTaken: state.trumpTaken,
     stockLeft: cardsLeftToDraw(state),
-    table: opts.table ?? (state.table ? [state.table] : []),
+    table: opts.table ?? state.table,
     turn: state.turn,
     mySeat: seat,
     myPoints: score(state, seat),
@@ -73,10 +73,9 @@ function viewFor(
 function lastTrickFor(state: GameState, seat: Seat): PublicView['lastTrick'] {
   const t = state.lastTrick
   if (!t) return null
-  const mineIsLead = t.leader === seat
   return {
-    mine: mineIsLead ? t.leadCard : t.followCard,
-    theirs: mineIsLead ? t.followCard : t.leadCard,
+    plays: t.plays,
+    winner: t.winner,
     iWon: t.winner === seat,
     points: t.points,
   }
@@ -201,7 +200,7 @@ abstract class AuthoritativeSession extends BaseSession {
   protected applyMove(seat: Seat, card: CardId): boolean {
     if (this.state.phase === 'over') return false
     if (this.state.turn !== seat) return false
-    if (!this.state.hands[seat].some(c => c.id === card)) return false
+    if (!this.state.hands[seat]?.some(c => c.id === card)) return false
 
     const before = this.state
     const { state, trick } = play(before, seat, card)
@@ -213,15 +212,10 @@ abstract class AuthoritativeSession extends BaseSession {
       return true
     }
 
-    // Hold both cards face-up for a beat so the loser can see what happened.
-    const shown: PublicView['table'] = [
-      { seat: trick.leader, card: trick.leadCard },
-      { seat: other(trick.leader), card: trick.followCard },
-    ]
-    this.broadcast({ table: shown, resolving: true, lastWinner: trick.winner })
+    // Hold the trick face-up for a beat so the losers can see what happened.
+    this.broadcast({ table: trick.plays, resolving: true, lastWinner: trick.winner })
     this.onTrickResolved({
-      leadCard: trick.leadCard.id,
-      followCard: trick.followCard.id,
+      plays: trick.plays.map(p => p.card.id),
       winner: trick.winner,
       points: trick.points,
     })
