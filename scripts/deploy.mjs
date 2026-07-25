@@ -86,7 +86,11 @@ function main() {
     }
 
     run('git', ['add', '-A'], staging)
-    run('git', ['commit', '-q', '-m', `Deploy ${sha}`], staging)
+    // --allow-empty matters: redeploying identical output must still produce a
+    // commit, otherwise `git commit` exits non-zero and — worse — there is no
+    // new tip to make GitHub Pages rebuild. Retrying a failed deploy is exactly
+    // when the content is unchanged.
+    run('git', ['commit', '-q', '--allow-empty', '-m', `Deploy ${sha}`], staging)
     run('git', ['push', '-q', ...(onTopOfExisting ? [] : ['-f']), 'origin', BRANCH], staging)
 
     console.log(`\n✓ Deployed ${sha} → ${BRANCH}`)
