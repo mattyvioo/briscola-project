@@ -194,6 +194,7 @@ export function settingsPanel(
 
 export function menuScreen(callbacks: MenuCallbacks, settings: MatchSettings): HTMLElement {
   const root = el('div', { class: 'screen screen-menu' })
+  let current = settings
 
   const choice = (label: string, hint: string, onClick: () => void, variant = '') => {
     const button = el(
@@ -201,6 +202,10 @@ export function menuScreen(callbacks: MenuCallbacks, settings: MatchSettings): H
       { class: `menu-item ${variant}`, type: 'button' },
       el('span', { class: 'menu-label', text: label }),
       el('span', { class: 'menu-hint', text: hint }),
+      // What this button will actually start. Without it you can tap "contro
+      // il computer" and be surprised by a four-handed game because the table
+      // size is buried in a collapsed settings panel.
+      el('span', { class: 'menu-setup' }),
     )
     button.addEventListener('click', onClick)
     return button
@@ -223,11 +228,41 @@ export function menuScreen(callbacks: MenuCallbacks, settings: MatchSettings): H
       choice(t.playAi, t.playAiHint, () => callbacks.onPlayAi()),
       choice(t.playHotseat, t.playHotseatHint, () => callbacks.onPlayHotseat()),
     ),
-    settingsPanel(settings, next => callbacks.onSettings(next)),
+    settingsPanel(settings, next => {
+      current = next
+      callbacks.onSettings(next)
+      paintSetup()
+    }),
     rulesCard(),
   )
 
+  /** Keeps the "what you'll get" line on each mode button in step. */
+  function paintSetup() {
+    const difficulty =
+      current.difficulty === 'easy'
+        ? t.diffEasy
+        : current.difficulty === 'hard'
+          ? t.diffHard
+          : t.diffNormal
+    const format = MATCH_FORMATS.find(f => sameFormatAs(f.format, current.format))?.label ?? ''
+
+    for (const node of root.querySelectorAll<HTMLElement>('.menu-item')) {
+      const isAi = node.querySelector('.menu-label')?.textContent === t.playAi
+      const line = node.querySelector('.menu-setup')
+      if (!line) continue
+      line.textContent = t.setupSummary(
+        current.players,
+        isAi ? `${format} · ${difficulty}` : format,
+      )
+    }
+  }
+  paintSetup()
+
   return root
+}
+
+function sameFormatAs(a: MatchFormat, b: MatchFormat): boolean {
+  return a.kind === b.kind && matchTarget(a) === matchTarget(b)
 }
 
 function joinForm(callbacks: MenuCallbacks): HTMLElement {

@@ -8,8 +8,11 @@
    --------------------------------------------------------------------------- */
 
 :root {
-  /* The one knob. clamp() means it scales smoothly instead of stepping. */
-  --card-w: clamp(58px, 17vw, 104px);
+  /* The one knob. clamp() means it scales smoothly instead of stepping.
+     Sized off width *and* height: at 17vw a phone left nearly half its screen
+     as empty felt, because three cards across only ever used two thirds of
+     the width available to them. */
+  --card-w: clamp(58px, min(26vw, 15vh), 124px);
   --card-ratio: 420 / 694;
   --gap: clamp(6px, 2vw, 14px);
 
@@ -367,6 +370,10 @@ body {
      so the hand never gets pushed off the bottom of a short viewport.
      Rows: hud, opponent hand, board, banner, own hand, reaction bar. */
   display: grid;
+  /* The board keeps 1fr so it is the row that absorbs shrink on a short
+     viewport, but its *content* is capped and biased downwards. Centring the
+     whole stack instead would lift the HUD off the top edge and drag the hand
+     out of thumb reach, which is worse than a little empty felt. */
   grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   gap: var(--gap);
   padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
@@ -401,11 +408,20 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--gold);
 }
+/* The visible pill stays compact so the HUD does not dominate, but the hit
+   area is padded out to 44px — a mis-tap on "Esci" abandons a live game. */
 .btn-leave {
+  position: relative;
   padding: 0.35rem 0.8rem;
   min-height: 36px;
   font-size: 0.82rem;
   border-radius: 999px;
+}
+.btn-leave::after,
+.btn-deck::after {
+  content: '';
+  position: absolute;
+  inset: -5px -4px;
 }
 
 /* Hands ------------------------------------------------------------------- */
@@ -588,15 +604,26 @@ body {
   gap: var(--gap);
   min-height: 0;
   position: relative;
+  /* Enough for the stock, the trick stack and the recap; anything beyond is
+     dead space between the hands. */
+  max-height: calc(var(--card-w) / (var(--card-ratio)) * 1.9);
+  align-self: center;
 }
 
 /* The briscola sits *beside* the deck rather than crosswise underneath it.
    It is the single most important card on the table and half of it used to be
    hidden behind the stock. */
+/* The deck and briscola are reference, not cards you play, so they run
+   smaller than the hand — at full size they ate two thirds of the board and
+   squeezed the trick off the right edge. */
 .stock {
   display: flex;
   align-items: center;
-  gap: calc(var(--gap) * 0.5);
+  gap: calc(var(--gap) * 0.4);
+  --stock-scale: 0.74;
+}
+.stock .card {
+  width: calc(var(--card-w) * var(--stock-scale));
 }
 
 .deck {
@@ -711,7 +738,7 @@ body {
   z-index: 4;
 }
 .played-from-1 {
-  transform: translate(calc(var(--card-w) * -0.42), 0) rotate(-6deg);
+  transform: translate(calc(var(--card-w) * -0.3), 0) rotate(-6deg);
   z-index: 3;
 }
 .played-from-2 {
@@ -719,7 +746,7 @@ body {
   z-index: 2;
 }
 .played-from-3 {
-  transform: translate(calc(var(--card-w) * 0.42), 0) rotate(6deg);
+  transform: translate(calc(var(--card-w) * 0.3), 0) rotate(6deg);
   z-index: 3;
 }
 /* Head to head there is no left/right, so keep the original stagger. */
@@ -1089,6 +1116,7 @@ body {
   gap: 0.35rem;
 }
 .btn-deck {
+  position: relative;
   min-height: 36px;
   min-width: 36px;
   padding: 0.2rem 0.5rem;
@@ -1126,4 +1154,15 @@ body {
   font-weight: 700;
   color: var(--gold);
   font-variant-numeric: tabular-nums;
+}
+
+/* "What this button will start" line under each mode. */
+.menu-setup {
+  font-size: 0.72rem;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+  margin-top: 0.15rem;
+}
+.menu-primary .menu-setup {
+  color: #241a05c9;
 }

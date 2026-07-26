@@ -6,14 +6,14 @@
 
 const it = {
   appTitle: 'Briscola',
-  tagline: 'Uno contro uno, direttamente tra i due browser.',
+  tagline: 'Da 2 a 4 giocatori, direttamente tra i browser.',
 
   playOnline: 'Gioca online',
   playAi: 'Contro il computer',
-  playHotseat: 'Due giocatori',
-  playOnlineHint: 'Crea una partita e invita un amico con un codice',
-  playAiHint: 'Allenati contro l’avversario automatico',
-  playHotseatHint: 'Sullo stesso dispositivo, a turno',
+  playHotseat: 'Stesso dispositivo',
+  playOnlineHint: 'Crea un tavolo e invita con un codice',
+  playAiHint: 'Allenati, i posti liberi li gioca il computer',
+  playHotseatHint: 'Tutti sullo stesso schermo, a turno',
 
   createRoom: 'Crea partita',
   joinRoom: 'Entra con codice',
@@ -43,6 +43,11 @@ const it = {
   player: (n: number) => `Giocatore ${n}`,
   yourTurn: 'Tocca a te',
   opponentTurn: 'Tocca all’avversario',
+  seatTurn: (who: string) => `Tocca a ${who}`,
+  us: 'Noi',
+  them: 'Loro',
+  setupSummary: (players: number, extra: string) =>
+    `${players} giocatori · ${extra}`,
   points: 'Punti',
   briscola: 'Briscola',
   deck: 'Mazzo',
@@ -107,14 +112,14 @@ const it = {
 
 const en: typeof it = {
   appTitle: 'Briscola',
-  tagline: 'One on one, straight between the two browsers.',
+  tagline: '2 to 4 players, straight between the browsers.',
 
   playOnline: 'Play online',
   playAi: 'Play the computer',
-  playHotseat: 'Two players',
-  playOnlineHint: 'Create a game and invite a friend with a code',
-  playAiHint: 'Practise against the built-in opponent',
-  playHotseatHint: 'Same device, taking turns',
+  playHotseat: 'Same device',
+  playOnlineHint: 'Open a table and invite with a code',
+  playAiHint: 'Practise — the computer plays any empty seats',
+  playHotseatHint: 'Everyone on one screen, taking turns',
 
   createRoom: 'Create game',
   joinRoom: 'Join with code',
@@ -144,6 +149,11 @@ const en: typeof it = {
   player: (n: number) => `Player ${n}`,
   yourTurn: 'Your turn',
   opponentTurn: 'Opponent’s turn',
+  seatTurn: (who: string) => `${who} to play`,
+  us: 'Us',
+  them: 'Them',
+  setupSummary: (players: number, extra: string) =>
+    `${players} players · ${extra}`,
   points: 'Points',
   briscola: 'Trump',
   deck: 'Deck',

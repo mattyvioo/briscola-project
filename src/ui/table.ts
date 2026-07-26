@@ -162,6 +162,8 @@ export class TableView {
   }
 
   private labels(view: PublicView): { mine: string; theirs: string } {
+    // With partners the score belongs to a side, not a person.
+    if (view.players === 4) return { mine: t.us, theirs: t.them }
     if (this.mode !== 'hotseat') return { mine: t.you, theirs: t.opponent }
     return { mine: t.player(view.mySeat + 1), theirs: t.player(other(view.mySeat) + 1) }
   }
@@ -362,20 +364,28 @@ export class TableView {
           () => cardBack(),
         )
 
-        node.querySelector('.seat-name')!.textContent = this.seatLabel(view, seat)
+        const name = this.seatLabel(view, seat)
+        node.querySelector('.seat-name')!.textContent =
+          seat.isPartner && seat.control === 'ai' ? `${name} 🤖` : name
         // With partners the number is the *team's*, which is what you play for.
         node.querySelector('.seat-points')!.textContent = String(seat.points)
       },
     )
   }
 
-  /** How to refer to another seat: by role at 2 players, by number beyond. */
+  /**
+   * How to refer to another seat.
+   *
+   * Being your partner outranks being a bot: at a four-handed table every
+   * seat may well be a computer, and "Computer / Computer / Computer" leaves
+   * you unable to tell which one you are playing *with*. The bot marker goes
+   * beside the name instead.
+   */
   private seatLabel(view: PublicView, seat: PublicView['seats'][number]): string {
     if (seat.awaiting) return t.awaitingShort
-    if (seat.control === 'ai') return t.botName
-    if (view.players === 2) return t.opponent
     if (seat.isPartner) return t.partner
-    return t.player(seat.seat + 1)
+    if (view.players === 2) return seat.control === 'ai' ? t.botName : t.opponent
+    return seat.control === 'ai' ? `${t.player(seat.seat + 1)} 🤖` : t.player(seat.seat + 1)
   }
 
   private renderMyHand(view: PublicView) {
@@ -519,8 +529,17 @@ export class TableView {
       return
     }
     const yourTurn = v.turn === v.mySeat
-    this.banner.textContent =
-      this.mode === 'hotseat' ? (yourTurn ? t.yourTurn : '') : yourTurn ? t.yourTurn : t.opponentTurn
+    if (yourTurn) {
+      this.banner.textContent = t.yourTurn
+    } else if (this.mode === 'hotseat') {
+      this.banner.textContent = ''
+    } else if (v.players === 2) {
+      this.banner.textContent = t.opponentTurn
+    } else {
+      // "the opponent" is meaningless with two or three of them: say who.
+      const seat = v.seats.find(s => s.seat === v.turn)
+      this.banner.textContent = seat ? t.seatTurn(this.seatLabel(v, seat)) : t.opponentTurn
+    }
     this.banner.classList.toggle('banner-active', yourTurn && !v.resolving)
   }
 
