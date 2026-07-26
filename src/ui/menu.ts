@@ -1,5 +1,13 @@
 import { DIFFICULTIES, type Difficulty } from '../game/ai'
-import { DECK_IDS, deckStyle, type DeckId } from '../game/decks'
+import {
+  DECK_IDS,
+  deckStyle,
+  TABLE_LABELS,
+  TABLE_SWATCHES,
+  TABLE_THEMES,
+  type DeckId,
+  type TableTheme,
+} from '../game/decks'
 import { MATCH_FORMATS, matchTarget, type MatchFormat } from '../game/match'
 import { cleanName, DELAY_OPTIONS, MAX_NAME_LENGTH, type MatchSettings } from '../game/settings'
 import { PLAYER_COUNTS, type PlayerCount } from '../game/table'
@@ -39,6 +47,7 @@ export function settingsPanel(
 
   const paceRow = el('div', { class: 'setting-options' })
   const deckRow = el('div', { class: 'setting-options' })
+  const tableRow = el('div', { class: 'setting-options' })
   const formatRow = el('div', { class: 'setting-options' })
   const difficultyRow = el('div', { class: 'setting-options' })
   const playersRow = el('div', { class: 'setting-options' })
@@ -131,6 +140,25 @@ export function settingsPanel(
       }),
     )
 
+    tableRow.replaceChildren(
+      ...TABLE_THEMES.map((id: TableTheme) => {
+        const swatch = el('span', { class: 'table-swatch' })
+        swatch.style.background = TABLE_SWATCHES[id]
+        const b = el(
+          'button',
+          {
+            class: `chip chip-table${id === current.table ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-pressed': id === current.table,
+          },
+          swatch,
+          el('span', { class: 'chip-label', text: TABLE_LABELS[id] }),
+        )
+        b.addEventListener('click', () => update({ table: id }))
+        return b
+      }),
+    )
+
     deckRow.replaceChildren(
       ...DECK_IDS.map((id: DeckId) => {
         const style = deckStyle(id)
@@ -205,6 +233,13 @@ export function settingsPanel(
           paceRow,
         )
       : null,
+    el(
+      'div',
+      { class: 'setting' },
+      el('span', { class: 'field-label', text: t.tableTheme }),
+      el('span', { class: 'muted small', text: t.tableThemeHint }),
+      tableRow,
+    ),
     el(
       'div',
       { class: 'setting' },

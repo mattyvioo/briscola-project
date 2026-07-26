@@ -146,3 +146,33 @@ const RANK_WORDS: Readonly<Record<1 | 2 | 3 | 4 | 5 | 6 | 7, string>> = {
 export function suitName(suit: Suit, deck: DeckId): string {
   return deckStyle(deck).suits[suit]
 }
+
+
+/**
+ * Table colour. Only the cloth, its shading and the rail change — every other
+ * surface on the table derives from those, so a theme is a handful of CSS
+ * variables rather than a second stylesheet.
+ */
+export const TABLE_THEMES = ['green', 'burgundy', 'midnight', 'wood'] as const
+export type TableTheme = (typeof TABLE_THEMES)[number]
+
+export const DEFAULT_TABLE: TableTheme = 'green'
+
+export const TABLE_LABELS: Readonly<Record<TableTheme, string>> = {
+  green: 'Verde',
+  burgundy: 'Bordeaux',
+  midnight: 'Notte',
+  wood: 'Legno',
+}
+
+/** Swatch colours for the picker, matching the cloth each theme paints. */
+export const TABLE_SWATCHES: Readonly<Record<TableTheme, string>> = {
+  green: '#176c44',
+  burgundy: '#7d1c2d',
+  midnight: '#1f4480',
+  wood: '#8a5c2e',
+}
+
+export function isTableTheme(value: unknown): value is TableTheme {
+  return typeof value === 'string' && (TABLE_THEMES as readonly string[]).includes(value)
+}

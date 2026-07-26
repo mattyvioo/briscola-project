@@ -27,8 +27,14 @@ let settings: MatchSettings = loadSettings()
 function updateSettings(next: MatchSettings) {
   settings = next
   saveSettings(next)
+  applyTheme(next)
   // Warm the cache for the newly chosen artwork.
   preloadDeck(freshDeck(), next.deck)
+}
+
+/** The theme is a data attribute; the stylesheet does the rest. */
+function applyTheme(next: MatchSettings) {
+  document.documentElement.dataset['table'] = next.table
 }
 
 function teardown() {
@@ -191,6 +197,7 @@ function route() {
   else joinOnline(room.code)
 }
 
+applyTheme(settings)
 preloadDeck(freshDeck(), settings.deck)
 
 window.addEventListener('hashchange', route)

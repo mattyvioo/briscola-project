@@ -1249,15 +1249,7 @@ body {
 
 /* --- reduced motion ------------------------------------------------------- */
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
-}
+
 
 /* HUD centre cluster: deck switch + leave ---------------------------------- */
 
@@ -1334,4 +1326,110 @@ body {
 .name-input:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 1px;
+}
+
+/* Table colour picker. */
+.chip-table {
+  flex-direction: row;
+  gap: 0.4rem;
+  align-items: center;
+}
+.table-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid #0000004d;
+  box-shadow: inset 0 1px 0 #ffffff33;
+  flex: none;
+}
+
+/* --- motion ----------------------------------------------------------------
+   Three moments carry the game: a card arriving in your hand, a card being
+   played, and a finished trick being gathered up. Everything here is behind
+   prefers-reduced-motion at the foot of this file. */
+
+/* A card dealt or drawn flies in from the stock, which sits to the left. */
+.hand-mine .card.is-arriving {
+  animation: deal-in 0.34s cubic-bezier(0.2, 0.75, 0.3, 1) backwards;
+}
+@keyframes deal-in {
+  from {
+    opacity: 0;
+    transform: translate(-45vw, -12vh) rotate(-24deg) scale(0.82);
+  }
+}
+
+/* Played cards arrive from the direction of the seat that played them. */
+.played-from-0 {
+  animation: play-from-below 0.26s ease-out;
+}
+.played-from-1 {
+  animation: play-from-left 0.26s ease-out;
+}
+.played-from-2 {
+  animation: play-from-above 0.26s ease-out;
+}
+.played-from-3 {
+  animation: play-from-right 0.26s ease-out;
+}
+@keyframes play-from-below {
+  from { opacity: 0; transform: translate(0, 40vh) rotate(-8deg); }
+}
+@keyframes play-from-left {
+  from { opacity: 0; transform: translate(-40vw, 0) rotate(-20deg); }
+}
+@keyframes play-from-above {
+  from { opacity: 0; transform: translate(0, -30vh) rotate(8deg); }
+}
+@keyframes play-from-right {
+  from { opacity: 0; transform: translate(40vw, 0) rotate(20deg); }
+}
+
+/* The finished trick is gathered towards whoever took it. The delay lets the
+   winner registered before anything moves. */
+.trick-resolving .played {
+  animation: sweep 0.5s ease-in 0.55s backwards;
+  animation-fill-mode: forwards;
+}
+@keyframes sweep {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+    translate: calc(var(--sweep-x, 0) * 34vw) calc(var(--sweep-y, 0) * 16vh);
+    scale: 0.82;
+  }
+}
+/* The winner stays put and lit while the losers are swept away — it is the
+   card you are meant to be reading. */
+.trick-resolving .played-winner {
+  animation: none;
+}
+
+/* --- reduced motion --------------------------------------------------------
+   Last in the file on purpose, so it also covers anything added below the
+   original animations. animation-delay matters as much as duration here: the
+   trick sweep is delayed, and zeroing only the duration would still leave a
+   pause and then a jump straight to the faded end state. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  /* The sweep exists only to be watched. Without motion, leave the trick
+     where it is and simply keep the winner legible. */
+  .trick-resolving .played {
+    animation: none !important;
+    opacity: 0.55;
+  }
+  .trick-resolving .played-winner {
+    opacity: 1;
+  }
 }

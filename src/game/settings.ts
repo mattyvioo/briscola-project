@@ -1,5 +1,5 @@
 import { isDifficulty, type Difficulty } from './ai'
-import { DEFAULT_DECK, isDeckId, type DeckId } from './decks'
+import { DEFAULT_DECK, DEFAULT_TABLE, isDeckId, isTableTheme, type DeckId, type TableTheme } from './decks'
 import { isMatchFormat, type MatchFormat } from './match'
 import { isPlayerCount, type PlayerCount } from './table'
 
@@ -23,6 +23,8 @@ export interface MatchSettings {
   readonly difficulty: Difficulty
   /** Shown to the other players. Empty means "just call me Tu". */
   readonly name: string
+  /** Colour of the cloth. Local taste, not shared. */
+  readonly table: TableTheme
 }
 
 export interface DelayOption {
@@ -49,6 +51,7 @@ export const DEFAULT_SETTINGS: MatchSettings = {
   players: 2,
   difficulty: 'normal',
   name: '',
+  table: DEFAULT_TABLE,
 }
 
 const STORAGE_KEY = 'briscola.settings'
@@ -78,6 +81,7 @@ export function normaliseSettings(value: unknown): MatchSettings {
     players: isPlayerCount(raw.players) ? raw.players : DEFAULT_SETTINGS.players,
     difficulty: isDifficulty(raw.difficulty) ? raw.difficulty : DEFAULT_SETTINGS.difficulty,
     name: cleanName(raw.name),
+    table: isTableTheme(raw.table) ? raw.table : DEFAULT_SETTINGS.table,
   }
 }
 

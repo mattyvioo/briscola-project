@@ -42,6 +42,17 @@ const MAX_FLOATING_REACTIONS = 14
 /** Sounds overlap badly, so they get a real (if still short) gate. */
 const SOUND_COOLDOWN_MS = 350
 
+/**
+ * Where a won trick is gathered to, by the winner's distance round the table.
+ * 0 is you (down), 1 left, 2 across, 3 right.
+ */
+const SWEEP_DIRECTION: Record<number, [number, number]> = {
+  0: [0, 1],
+  1: [-1, -0.25],
+  2: [0, -1],
+  3: [1, -0.25],
+}
+
 export class TableView {
   readonly root: HTMLElement
 
@@ -404,12 +415,24 @@ export class TableView {
     syncKeyed(
       this.myHand,
       view.hand.map(c => `${view.deck}:${c.id}`),
-      key =>
-        cardFace(parseCard(key.split(':')[1] as CardId), {
+      key => {
+        const node = cardFace(parseCard(key.split(':')[1] as CardId), {
           deck: this.deck,
           playable: true,
           trump: view.trumpSuit,
-        }),
+        })
+        // Any card that appears in the hand has just been dealt or drawn, so
+        // fly it in from the stock. One mechanism covers both.
+        //
+        // Cleared on a timer as well as on animationend: a backgrounded tab
+        // may never run the animation at all, and the event would then never
+        // fire. A stale class is harmless but the timer keeps state honest.
+        node.classList.add('is-arriving')
+        const done = () => node.classList.remove('is-arriving')
+        node.addEventListener('animationend', done, { once: true })
+        setTimeout(done, 600)
+        return node
+      },
       (node, _key, index) => {
         node.classList.toggle('is-disabled', !playable)
         node.toggleAttribute('disabled', !playable)
@@ -481,6 +504,16 @@ export class TableView {
     }
     this.trick.className = `trick trick-${view.players}`
     this.trick.classList.toggle('trick-resolving', view.resolving)
+
+    // Point the sweep at the winner's side of the table. The drift may be cut
+    // short when the trick clears — that reads as the cards being gathered up,
+    // which is the intent.
+    if (view.resolving && view.lastWinner !== null) {
+      const offset = (view.lastWinner - view.mySeat + view.players) % view.players
+      const [x, y] = SWEEP_DIRECTION[view.players === 2 && offset === 1 ? 2 : offset] ?? [0, 0]
+      this.trick.style.setProperty('--sweep-x', `${x}`)
+      this.trick.style.setProperty('--sweep-y', `${y}`)
+    }
   }
 
   /** A small recap of the previous trick, so you can check what was played. */
