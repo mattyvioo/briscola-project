@@ -33,6 +33,16 @@ import type { PeerId, Transport } from './transport'
 export const AI_THINK_MS = 650
 
 /**
+ * How long a seat is held for a player who vanished.
+ *
+ * Long enough to survive a reload, a tunnel, or a phone call — mobile
+ * browsers discard backgrounded tabs routinely — but not so long that the
+ * others are stuck staring at a paused board. After it expires the seat is
+ * handed to an AI so the hand can finish; the player can still take it back.
+ */
+export const RECONNECT_GRACE_MS = 90_000
+
+/**
  * How a seat is driven.
  *
  * This one field replaces what used to be three near-identical session
@@ -49,6 +59,12 @@ export interface SeatConfig {
   /** Survives a reload, unlike the transport's per-session peer id. */
   clientId?: string
   peerId?: string
+  /**
+   * Set when the peer went away and we are holding their seat. The seat stays
+   * 'remote' so it can be reclaimed; if the grace period lapses it becomes
+   * 'ai' and this clears.
+   */
+  awaitingSince?: number
 }
 
 export type SessionMode = 'online' | 'ai' | 'hotseat'
@@ -61,6 +77,8 @@ export type SessionStatus =
   | { kind: 'disconnected' }
   /** The room already has all its players. */
   | { kind: 'full' }
+  /** Somebody dropped; their seat is being held open. */
+  | { kind: 'awaiting'; seat: Seat; name?: string }
 
 export interface Session {
   readonly mode: SessionMode
@@ -241,6 +259,14 @@ export class GameSession extends BaseSession {
         : 'ai'
   }
 
+  /**
+   * True while the game must not move on. Overridden by the host, which pauses
+   * when the player whose turn it is has dropped.
+   */
+  protected isPaused(): boolean {
+    return false
+  }
+
   private firstLocalSeat(): Seat {
     const i = this.seats.findIndex(s => s.control === 'local')
     return i === -1 ? 0 : i
@@ -321,6 +347,7 @@ export class GameSession extends BaseSession {
    */
   protected advance() {
     if (this.state.phase !== 'playing') return
+    if (this.isPaused()) return
     const seat = this.state.turn
     const control = this.seats[seat]?.control
 
@@ -404,8 +431,12 @@ export class HostSession extends GameSession {
   private seatFor(client: string, peer: PeerId): Seat | null {
     const known = this.seats.findIndex(s => s.clientId === client)
     if (known !== -1) {
-      this.seats[known]!.peerId = peer
-      this.seats[known]!.control = 'remote'
+      const config = this.seats[known]!
+      config.peerId = peer
+      // Takes the seat back even if a bot had been standing in for them.
+      config.control = 'remote'
+      delete config.awaitingSince
+      this.status({ kind: 'playing' })
       return known
     }
 
@@ -417,8 +448,39 @@ export class HostSession extends GameSession {
 
   private onPeerLeave(peer: PeerId) {
     const seat = this.seats.findIndex(s => s.peerId === peer)
-    if (seat !== -1) delete this.seats[seat]!.peerId
-    if (!this.transport.isConnected()) this.status({ kind: 'disconnected' })
+    if (seat === -1) {
+      if (!this.transport.isConnected()) this.status({ kind: 'disconnected' })
+      return
+    }
+
+    const config = this.seats[seat]!
+    delete config.peerId
+    // Keep the game and the seat: the usual reason a peer vanishes is that a
+    // phone put the tab to sleep, and they are seconds from coming back.
+    config.awaitingSince = Date.now()
+
+    this.status({ kind: 'awaiting', seat, ...(config.name ? { name: config.name } : {}) })
+    this.broadcast()
+
+    this.later(() => this.giveSeatToAi(seat), RECONNECT_GRACE_MS)
+  }
+
+  /** The grace period lapsed: let a bot finish the hand for them. */
+  private giveSeatToAi(seat: Seat) {
+    const config = this.seats[seat]
+    if (!config || config.peerId || config.awaitingSince === undefined) return
+
+    config.control = 'ai'
+    delete config.awaitingSince
+    this.status(this.transport.isConnected() ? { kind: 'playing' } : { kind: 'disconnected' })
+    this.broadcast()
+    this.advance()
+  }
+
+  /** Any seat still being held for a player who left stops the clock. */
+  protected override isPaused(): boolean {
+    const seat = this.seats[this.state.turn]
+    return seat?.control === 'remote' && seat.awaitingSince !== undefined
   }
 
   override start() {

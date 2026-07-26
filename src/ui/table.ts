@@ -475,6 +475,7 @@ export class TableView {
     if (this.status.kind === 'handoff') return this.showOverlay(this.handoffPanel(this.status.seat))
     if (this.status.kind === 'disconnected') return this.showOverlay(this.disconnectedPanel())
     if (this.status.kind === 'full') return this.showOverlay(this.fullPanel())
+    if (this.status.kind === 'awaiting') return this.showOverlay(this.awaitingPanel())
     if (this.status.kind === 'waiting') return this.showOverlay(this.waitingPanel())
     if (v && v.phase === 'over' && !v.resolving) return this.showOverlay(this.resultPanel(v))
 
@@ -496,6 +497,18 @@ export class TableView {
       el('h2', { text: t.waitingOpponent }),
       this.roomCode ? el('p', { class: 'muted', text: t.shareCode }) : null,
       this.roomCode ? el('div', { class: 'code code-lg', text: this.roomCode }) : null,
+      this.ghostButton(t.leave, () => this.callbacks.onLeave()),
+    )
+  }
+
+  /** Somebody dropped and we are holding their seat open. */
+  private awaitingPanel(): HTMLElement {
+    return el(
+      'div',
+      { class: 'panel' },
+      el('div', { class: 'spinner', 'aria-hidden': 'true' }),
+      el('h2', { text: t.awaitingPlayer }),
+      el('p', { class: 'muted', text: t.awaitingHint }),
       this.ghostButton(t.leave, () => this.callbacks.onLeave()),
     )
   }

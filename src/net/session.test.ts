@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { aiSession, hotseatSession, HostSession, type SessionStatus } from './session'
+import { aiSession, hotseatSession, HostSession, RECONNECT_GRACE_MS, type SessionStatus } from './session'
 import { REACTIONS, type NetMsg, type PublicView } from './protocol'
 import type { Transport } from './transport'
 import { TOTAL_POINTS } from '../game/rules'
@@ -503,5 +503,112 @@ describe('redaction with several peers', () => {
     const againSeat = f.to('peer-9').find(m => m.t === 'seated') as { seat: number }
     expect(againSeat.seat).toBe(firstSeat.seat)
     expect(f.to('peer-9').some(m => m.t === 'full')).toBe(false)
+  })
+})
+
+describe('reconnection', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  function seatedGame() {
+    const f = fakeTransport()
+    const statuses: SessionStatus[] = []
+    const hostViews: PublicView[] = []
+    const host = new HostSession(f.transport, 2468, { ...DEFAULT_SETTINGS, trickDelayMs: 5 })
+    host.onStatus(st => statuses.push(st))
+    host.onView(v => hostViews.push(v))
+    host.start()
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    const viewOf = () =>
+      f.to('peer-1').filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+    // Once a peer is gone the host stops addressing it, so that peer's last
+    // view goes stale. The host's own view is the only live observer after a
+    // drop — reading `viewOf()` there would spin on a frozen snapshot.
+    const hostView = () => hostViews.at(-1)!
+    return { f, host, statuses, viewOf, hostView }
+  }
+
+  it('keeps the game when a peer drops, rather than ending it', () => {
+    const { f, statuses, viewOf } = seatedGame()
+    const before = viewOf()
+
+    f.part('peer-1')
+
+    expect(statuses.at(-1)!.kind).toBe('awaiting')
+    // The state is still there — this is what used to be lost.
+    const after = f.to('peer-1').filter(m => m.t === 'view').at(-1)
+    expect(after).toBeDefined()
+    expect(viewOf().trickNumber).toBe(before.trickNumber)
+  })
+
+  it('restores the seat and the game when the same client returns', () => {
+    const { f, statuses, viewOf } = seatedGame()
+    const handBefore = viewOf().hand.map(c => c.id)
+
+    f.part('peer-1')
+    // A reload gives the same browser a brand new peer id.
+    f.join('peer-2')
+    f.receive(hello('client-1'), 'peer-2')
+
+    const seated = f.to('peer-2').find(m => m.t === 'seated') as { seat: number } | undefined
+    expect(seated?.seat).toBe(1)
+    const view = f.to('peer-2').filter(m => m.t === 'view').map(m => (m as { view: PublicView }).view).at(-1)!
+    expect(view.hand.map(c => c.id)).toEqual(handBefore)
+    expect(statuses.at(-1)!.kind).toBe('playing')
+  })
+
+  it('pauses rather than playing on while the seat is held', () => {
+    const { f, host, hostView } = seatedGame()
+
+    // Get to the point where the player about to vanish is the one to move.
+    if (hostView().turn === 0) host.play(hostView().hand[0]!.id)
+    vi.advanceTimersByTime(50)
+    expect(hostView().turn).toBe(1)
+
+    f.part('peer-1')
+    const trickBefore = hostView().trickNumber
+
+    // Nothing may move while their seat is held, however long the clock runs.
+    vi.advanceTimersByTime(RECONNECT_GRACE_MS - 1000)
+    expect(hostView().trickNumber).toBe(trickBefore)
+    expect(hostView().turn).toBe(1)
+  })
+
+  it('hands the seat to a bot once the grace period lapses', () => {
+    const { f, host, statuses, hostView } = seatedGame()
+    f.part('peer-1')
+    expect(statuses.at(-1)!.kind).toBe('awaiting')
+
+    const stuckAt = hostView().trickNumber
+    vi.advanceTimersByTime(RECONNECT_GRACE_MS + 100)
+    expect(statuses.at(-1)!.kind).not.toBe('awaiting')
+
+    // The bot now plays that seat, so the hand runs to the end with only the
+    // host still human.
+    let guard = 0
+    while (hostView().phase === 'playing') {
+      if (guard++ > 500) throw new Error('game stalled after AI takeover')
+      vi.advanceTimersByTime(100)
+      const v = hostView()
+      if (v.phase === 'playing' && v.turn === 0 && !v.resolving && v.hand.length > 0) {
+        host.play(v.hand[0]!.id)
+      }
+    }
+    expect(hostView().phase).toBe('over')
+    expect(hostView().trickNumber).toBeGreaterThan(stuckAt)
+  })
+
+  it('lets a player reclaim a seat a bot took over', () => {
+    const { f } = seatedGame()
+    f.part('peer-1')
+    vi.advanceTimersByTime(RECONNECT_GRACE_MS + 100)
+
+    f.join('peer-3')
+    f.receive(hello('client-1'), 'peer-3')
+
+    const seated = f.to('peer-3').find(m => m.t === 'seated') as { seat: number } | undefined
+    expect(seated?.seat).toBe(1)
+    expect(f.to('peer-3').some(m => m.t === 'full')).toBe(false)
   })
 })

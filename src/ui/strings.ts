@@ -29,6 +29,9 @@ const it = {
   connecting: 'Connessione in corso…',
   waitingOpponent: 'In attesa dell’avversario…',
   opponentLeft: 'L’avversario si è disconnesso',
+  awaitingPlayer: 'Giocatore disconnesso',
+  awaitingHint: 'Aspettiamo che torni. Se non torna, gioca il computer.',
+  seatTakenByAi: 'Il computer gioca al suo posto',
   roomFull: 'Partita al completo',
   roomFullHint: 'Tutti i posti a questo tavolo sono occupati.',
 
@@ -119,6 +122,9 @@ const en: typeof it = {
   connecting: 'Connecting…',
   waitingOpponent: 'Waiting for opponent…',
   opponentLeft: 'Your opponent disconnected',
+  awaitingPlayer: 'Player disconnected',
+  awaitingHint: 'Waiting for them to come back. If they don’t, the computer takes over.',
+  seatTakenByAi: 'The computer is playing their seat',
   roomFull: 'Table is full',
   roomFullHint: 'Every seat at this table is taken.',
 
