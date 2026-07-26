@@ -47,7 +47,7 @@ export class TableView {
   private hudTheirs: HTMLElement
   private nameMine: HTMLElement
   private nameTheirs: HTMLElement
-  private opponentHand: HTMLElement
+  private opponents: HTMLElement
   private myHand: HTMLElement
   private trick: HTMLElement
   private stock: HTMLElement
@@ -78,7 +78,7 @@ export class TableView {
     this.nameMine = el('span', { class: 'score-name' })
     this.hudMine = el('span', { class: 'score-value', text: '0' })
 
-    this.opponentHand = el('div', { class: 'hand hand-opponent' })
+    this.opponents = el('div', { class: 'opponents' })
     this.myHand = el('div', { class: 'hand hand-mine' })
     this.trick = el('div', { class: 'trick' })
     this.stock = el('div', { class: 'stock' })
@@ -117,7 +117,7 @@ export class TableView {
         el('div', { class: 'hud-mid' }, this.matchChip, this.deckBtn, leave),
         el('div', { class: 'score score-mine' }, this.nameMine, this.hudMine),
       ),
-      this.opponentHand,
+      this.opponents,
       el('div', { class: 'board' }, this.stock, this.trick, this.lastTrickBox),
       this.banner,
       this.myHand,
@@ -189,9 +189,12 @@ export class TableView {
     this.nameTheirs.textContent = theirs
     this.hudMine.textContent = String(view.myPoints)
     this.hudTheirs.textContent = String(view.opponentPoints)
+    // Beyond 1v1 the "opponent" chip is meaningless — each seat carries its
+    // own team score instead.
+    this.root.classList.toggle('table-multi', view.players > 2)
 
     this.renderMatch(view)
-    this.renderOpponentHand(view)
+    this.renderOpponents(view)
     this.renderMyHand(view)
     this.renderStock(view)
     this.renderTrick(view)
@@ -317,9 +320,62 @@ export class TableView {
 
   // --- board --------------------------------------------------------------
 
-  private renderOpponentHand(view: PublicView) {
-    const keys = Array.from({ length: view.opponentCards }, (_, i) => `back-${i}`)
-    syncKeyed(this.opponentHand, keys, () => cardBack())
+  /**
+   * Everyone but you, laid out by their distance round the table rather than
+   * by seat number, so the board reads the same whichever seat you hold:
+   *
+   *   2 players   opponent opposite
+   *   3 players   two opponents, upper left and upper right
+   *   4 players   partner opposite, opponents left and right
+   */
+  private renderOpponents(view: PublicView) {
+    const others = view.seats.filter(s => !s.isMe)
+    this.opponents.className = `opponents opponents-${view.players}`
+
+    syncKeyed(
+      this.opponents,
+      others.map(s => `seat-${s.seat}`),
+      key => {
+        const box = el('div', { class: 'seat' })
+        box.dataset['key'] = key
+        box.append(
+          el('div', { class: 'seat-hand' }),
+          el(
+            'div',
+            { class: 'seat-tag' },
+            el('span', { class: 'seat-name' }),
+            el('span', { class: 'seat-points' }),
+          ),
+        )
+        return box
+      },
+      (node, _key, index) => {
+        const seat = others[index]!
+        node.className = `seat seat-at-${seat.offset}${seat.isPartner ? ' seat-partner' : ''}`
+        node.classList.toggle('is-turn', seat.seat === view.turn && !view.resolving)
+        node.classList.toggle('is-awaiting', seat.awaiting)
+
+        const hand = node.querySelector<HTMLElement>('.seat-hand')!
+        syncKeyed(
+          hand,
+          Array.from({ length: seat.cards }, (_, i) => `${seat.seat}-back-${i}`),
+          () => cardBack(),
+        )
+
+        node.querySelector('.seat-name')!.textContent = this.seatLabel(view, seat)
+        // With partners the number is the *team's*, which is what you play for.
+        node.querySelector('.seat-points')!.textContent = String(seat.points)
+      },
+    )
+  }
+
+  /** How to refer to another seat: by role at 2 players, by number beyond. */
+  private seatLabel(view: PublicView, seat: PublicView['seats'][number]): string {
+    if (seat.awaiting) return t.awaitingShort
+    if (seat.control === 'ai') return t.botName
+    if (view.players === 2) return t.opponent
+    if (seat.isPartner) return t.partner
+    return t.player(seat.seat + 1)
   }
 
   private renderMyHand(view: PublicView) {
@@ -385,12 +441,14 @@ export class TableView {
   private renderTrick(view: PublicView) {
     clear(this.trick)
     for (const played of view.table) {
-      const isMine = played.seat === view.mySeat
+      // Nudge each card towards whoever played it, so at 3 and 4 players you
+      // can see who put down what without reading seat numbers.
+      const offset = (played.seat - view.mySeat + view.players) % view.players
       this.trick.appendChild(
         el(
           'div',
           {
-            class: `played ${isMine ? 'played-mine' : 'played-theirs'}${
+            class: `played played-from-${offset}${
               view.resolving && view.lastWinner === played.seat ? ' played-winner' : ''
             }`,
           },
@@ -398,6 +456,7 @@ export class TableView {
         ),
       )
     }
+    this.trick.className = `trick trick-${view.players}`
     this.trick.classList.toggle('trick-resolving', view.resolving)
   }
 

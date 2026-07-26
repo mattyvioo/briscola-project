@@ -417,13 +417,101 @@ body {
   min-height: calc(var(--card-w) / (var(--card-ratio)));
 }
 
-.hand-opponent {
-  /* Face-down cards overlap slightly — they carry no information, so they can
-     give their space to the board. */
+/* Opponents ---------------------------------------------------------------
+
+   Seats are placed by their distance round the table from you, never by seat
+   number, so the board reads identically whichever seat you happen to hold.
+   offset 1 = to your left, 2 = opposite (your partner at four), 3 = right. */
+
+.opponents {
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  gap: 2px;
+  min-height: calc(var(--card-w) / (var(--card-ratio)) * 0.72);
+}
+/* 1v1: the single opponent sits opposite. */
+.opponents-2 {
+  grid-template-columns: 1fr;
+}
+/* Three-handed: both opponents across the top, left and right. */
+.opponents-3 {
+  grid-template-columns: 1fr 1fr;
+}
+/* Four-handed: left | partner | right. */
+.opponents-4 {
+  grid-template-columns: 1fr 1.2fr 1fr;
+}
+.opponents-4 .seat-at-1 {
+  grid-column: 1;
+}
+.opponents-4 .seat-at-2 {
+  grid-column: 2;
+}
+.opponents-4 .seat-at-3 {
+  grid-column: 3;
+}
+
+.seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition: border-color 0.2s ease, opacity 0.2s ease;
+}
+.seat.is-turn {
+  border-color: var(--gold);
+  background: #e0b64a14;
+}
+.seat.is-awaiting {
+  opacity: 0.5;
+}
+
+.seat-hand {
+  display: flex;
+  /* Face-down cards carry no information, so they give their space to the
+     board — heavily overlapped, and smaller still at a crowded table. */
   gap: 0;
 }
-.hand-opponent .card + .card {
-  margin-left: calc(var(--card-w) * -0.42);
+.seat-hand .card {
+  width: calc(var(--card-w) * var(--seat-scale, 0.72));
+}
+.seat-hand .card + .card {
+  margin-left: calc(var(--card-w) * -0.5);
+}
+.opponents-3,
+.opponents-4 {
+  --seat-scale: 0.56;
+}
+
+.seat-tag {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.seat-name {
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.seat-points {
+  font-weight: 700;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.seat-partner .seat-name {
+  color: #8fc7a4;
+}
+
+/* At more than two seats the HUD's opponent chip is meaningless: each seat
+   shows its own team score. */
+.table-multi .score-theirs {
+  display: none;
 }
 
 .card {
@@ -599,22 +687,47 @@ body {
   position: relative; /* anchor for .trump-badge */
 }
 
+/* The trick is a *stack*, not a row: each card is absolutely centred and then
+   nudged towards whoever played it. Laying them out as flex items would add
+   the offsets on top of their natural width and run off the screen once four
+   seats are in play. */
 .trick {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: calc(var(--card-w) / (var(--card-ratio)) * 1.2);
+  min-height: calc(var(--card-w) / (var(--card-ratio)) * 1.35);
+  min-width: 0;
 }
 .played {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: calc(var(--card-w) * -0.5);
+  margin-top: calc(var(--card-w) / (var(--card-ratio)) * -0.5);
   animation: play-in 0.22s ease-out;
 }
-.played-theirs {
-  transform: translate(calc(var(--card-w) * -0.22), calc(var(--card-w) * -0.14)) rotate(-5deg);
+/* Each card sits towards whoever played it: you from below, the seat on your
+   left from the left, and so on. */
+.played-from-0 {
+  transform: translate(0, calc(var(--card-w) * 0.3)) rotate(3deg);
+  z-index: 4;
 }
-.played-mine {
-  transform: translate(calc(var(--card-w) * 0.22), calc(var(--card-w) * 0.14)) rotate(4deg);
+.played-from-1 {
+  transform: translate(calc(var(--card-w) * -0.42), 0) rotate(-6deg);
+  z-index: 3;
+}
+.played-from-2 {
+  transform: translate(0, calc(var(--card-w) * -0.3)) rotate(4deg);
   z-index: 2;
+}
+.played-from-3 {
+  transform: translate(calc(var(--card-w) * 0.42), 0) rotate(6deg);
+  z-index: 3;
+}
+/* Head to head there is no left/right, so keep the original stagger. */
+.trick-2 .played-from-0 {
+  transform: translate(calc(var(--card-w) * 0.22), calc(var(--card-w) * 0.14)) rotate(4deg);
+}
+.trick-2 .played-from-1 {
+  transform: translate(calc(var(--card-w) * -0.22), calc(var(--card-w) * -0.14)) rotate(-5deg);
 }
 .played-winner .card {
   box-shadow: 0 0 0 3px var(--gold), 0 8px 20px #00000073;

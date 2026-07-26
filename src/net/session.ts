@@ -3,6 +3,7 @@ import type { CardId } from '../game/deck'
 import { isDeckId, type DeckId } from '../game/decks'
 import {
   allTeamScores,
+  teamScore,
   cardsLeftToDraw,
   newGame,
   play,
@@ -104,14 +105,15 @@ function viewFor(
   seat: Seat,
   deck: DeckId,
   match: MatchState,
+  seats: readonly SeatConfig[],
   opts: { table?: PublicView['table']; resolving?: boolean; lastWinner?: Seat | null } = {},
 ): PublicView {
   const players = state.config.players
   return {
     hand: state.hands[seat] ?? [],
-    // At more than two seats this is the next player round, which is what the
-    // 1v1 layout already shows. Phase 6 generalises the board itself.
     opponentCards: state.hands[nextSeat(seat, players)]?.length ?? 0,
+    seats: seatViews(state, seat, seats),
+    players,
     trumpCard: state.trumpCard,
     trumpSuit: state.trumpSuit,
     trumpTaken: state.trumpTaken,
@@ -140,6 +142,38 @@ function viewFor(
   }
 }
 
+/**
+ * Everyone at the table as this seat sees them — counts, never cards.
+ *
+ * `offset` is the distance round the table from the viewer, so the board can
+ * lay seats out relative to whoever is looking without knowing the seat
+ * numbers: 0 is you, 1 the player to your left, and so on.
+ */
+function seatViews(
+  state: GameState,
+  viewer: Seat,
+  seats: readonly SeatConfig[],
+): PublicView['seats'] {
+  const players = state.config.players
+  const myTeam = teamOf(state.config, viewer)
+
+  return state.hands.map((hand, i) => {
+    const team = teamOf(state.config, i)
+    const config = seats[i]
+    return {
+      seat: i,
+      cards: hand.length,
+      team,
+      offset: (i - viewer + players) % players,
+      isMe: i === viewer,
+      isPartner: i !== viewer && team === myTeam,
+      points: teamScore(state, team),
+      control: config?.control === 'ai' ? ('ai' as const) : ('human' as const),
+      awaiting: config?.awaitingSince !== undefined,
+    }
+  })
+}
+
 /** Re-frames the last trick from one seat's point of view. */
 function lastTrickFor(state: GameState, seat: Seat): PublicView['lastTrick'] {
   const t = state.lastTrick
@@ -147,7 +181,7 @@ function lastTrickFor(state: GameState, seat: Seat): PublicView['lastTrick'] {
   return { plays: t.plays, winner: t.winner, iWon: t.winner === seat, points: t.points }
 }
 
-type ViewOpts = Parameters<typeof viewFor>[4]
+type ViewOpts = Parameters<typeof viewFor>[5]
 
 /** Shared plumbing for handler registration. */
 abstract class BaseSession implements Session {
@@ -285,7 +319,7 @@ export class GameSession extends BaseSession {
   }
 
   protected broadcast(opts?: ViewOpts) {
-    this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, opts))
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, this.seats, opts))
   }
 
   applySettings(next: MatchSettings) {
@@ -490,14 +524,14 @@ export class HostSession extends GameSession {
   }
 
   protected override broadcast(opts?: ViewOpts) {
-    this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, opts))
+    this.emit(viewFor(this.state, this.viewer, this.settings.deck, this.match, this.seats, opts))
     // Each remote seat gets its own view, addressed to its own peer. These
     // carry that seat's hand, so a broadcast would deal everyone's cards face
     // up at a three or four player table.
     this.seats.forEach((seat, i) => {
       if (seat.control !== 'remote' || !seat.peerId) return
       this.send(
-        { t: 'view', view: viewFor(this.state, i, this.settings.deck, this.match, opts) },
+        { t: 'view', view: viewFor(this.state, i, this.settings.deck, this.match, this.seats, opts) },
         seat.peerId,
       )
     })

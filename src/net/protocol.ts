@@ -12,8 +12,11 @@ import type { SoundId } from '../ui/sounds'
 export interface PublicView {
   /** My own cards. */
   readonly hand: readonly Card[]
-  /** How many cards the opponent holds — not which ones. */
+  /** How many cards the opponent holds — not which ones. Two-player only. */
   readonly opponentCards: number
+  /** Everyone at the table, including me, in play order. */
+  readonly seats: readonly SeatView[]
+  readonly players: number
   readonly trumpCard: Card
   readonly trumpSuit: Suit
   readonly trumpTaken: boolean
@@ -65,6 +68,24 @@ export interface PublicView {
  * Match progress as one seat sees it. `scores` is whatever the format is
  * racing — hands won, or accumulated card points.
  */
+/**
+ * One seat as everybody else sees it: a card *count*, never the cards. Enough
+ * to draw a hand of backs and a score, and nothing more.
+ */
+export interface SeatView {
+  readonly seat: Seat
+  readonly cards: number
+  readonly team: number
+  /** Where to draw them relative to the viewer: 0 is me, then clockwise. */
+  readonly offset: number
+  readonly isMe: boolean
+  readonly isPartner: boolean
+  readonly points: number
+  readonly control: 'human' | 'ai'
+  /** Their seat is being held open after they dropped. */
+  readonly awaiting: boolean
+}
+
 export interface MatchView {
   readonly format: MatchFormat
   readonly handNumber: number
