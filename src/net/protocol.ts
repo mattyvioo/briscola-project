@@ -74,6 +74,8 @@ export interface PublicView {
  */
 export interface SeatView {
   readonly seat: Seat
+  /** What this player calls themselves, if they set anything. */
+  readonly name: string
   readonly cards: number
   readonly team: number
   /** Where to draw them relative to the viewer: 0 is me, then clockwise. */
@@ -121,7 +123,7 @@ export type ClientMsg =
    * Announce this browser. The clientId survives reloads, which is how the
    * host tells a returning player from a new one and restores their seat.
    */
-  | { readonly t: 'hello'; readonly clientId: string }
+  | { readonly t: 'hello'; readonly clientId: string; readonly name?: string }
   | { readonly t: 'play'; readonly card: CardId }
   | { readonly t: 'rematch' }
   | { readonly t: 'react'; readonly emoji: Reaction }

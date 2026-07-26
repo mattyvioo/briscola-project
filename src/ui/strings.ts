@@ -35,6 +35,12 @@ const it = {
   awaitingPlayer: 'Giocatore disconnesso',
   awaitingHint: 'Aspettiamo che torni. Se non torna, gioca il computer.',
   seatTakenByAi: 'Il computer gioca al suo posto',
+  seatingTitle: 'In attesa dei giocatori',
+  seatingBody: (missing: number, total: number) =>
+    missing === 1
+      ? `Manca 1 giocatore su ${total}. Condividi il codice.`
+      : `Mancano ${missing} giocatori su ${total}. Condividi il codice.`,
+  fillWithBots: 'Riempi con il computer',
   roomFull: 'Partita al completo',
   roomFullHint: 'Tutti i posti a questo tavolo sono occupati.',
 
@@ -68,6 +74,9 @@ const it = {
   matchDraw: 'Partita pari',
   handWon: 'Mano tua',
   handLost: 'Mano loro',
+  yourName: 'Il tuo nome',
+  yourNameHint: 'Come ti vedono gli altri al tavolo',
+  namePlaceholder: 'Senza nome',
   difficulty: 'Difficoltà',
   difficultyHint: 'Quanto giocano bene i posti del computer',
   diffEasy: 'Facile',
@@ -141,6 +150,12 @@ const en: typeof it = {
   awaitingPlayer: 'Player disconnected',
   awaitingHint: 'Waiting for them to come back. If they don’t, the computer takes over.',
   seatTakenByAi: 'The computer is playing their seat',
+  seatingTitle: 'Waiting for players',
+  seatingBody: (missing: number, total: number) =>
+    missing === 1
+      ? `1 more player needed of ${total}. Share the code.`
+      : `${missing} more players needed of ${total}. Share the code.`,
+  fillWithBots: 'Fill with computer',
   roomFull: 'Table is full',
   roomFullHint: 'Every seat at this table is taken.',
 
@@ -174,6 +189,9 @@ const en: typeof it = {
   matchDraw: 'Match drawn',
   handWon: 'Hand won',
   handLost: 'Hand lost',
+  yourName: 'Your name',
+  yourNameHint: 'How the others see you at the table',
+  namePlaceholder: 'Unnamed',
   difficulty: 'Difficulty',
   difficultyHint: 'How well the computer seats play',
   diffEasy: 'Easy',

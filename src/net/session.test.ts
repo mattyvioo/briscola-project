@@ -612,3 +612,99 @@ describe('reconnection', () => {
     expect(f.to('peer-3').some(m => m.t === 'full')).toBe(false)
   })
 })
+
+describe('waiting for a full table', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  function room(players: 2 | 3 | 4) {
+    const f = fakeTransport()
+    const statuses: SessionStatus[] = []
+    const views: PublicView[] = []
+    const host = new HostSession(f.transport, 31415, {
+      ...DEFAULT_SETTINGS,
+      players,
+      trickDelayMs: 5,
+    })
+    host.onStatus(st => statuses.push(st))
+    host.onView(v => views.push(v))
+    host.start()
+    return { f, host, statuses, views }
+  }
+
+  it.each([3, 4] as const)('does not deal at %i players until every seat is taken', players => {
+    const { f, statuses, views } = room(players)
+
+    // One opponent joins a three- or four-handed table: not enough.
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    vi.advanceTimersByTime(5_000)
+
+    expect(statuses.at(-1)!.kind, 'started with an empty seat').toBe('seating')
+    // Nothing has been played: the trick number never moved off the first.
+    expect(views.at(-1)!.trickNumber).toBe(1)
+    expect(views.at(-1)!.table).toHaveLength(0)
+
+    // Everyone else arrives.
+    for (let i = 2; i < players; i++) {
+      f.join(`peer-${i}`)
+      f.receive(hello(`client-${i}`), `peer-${i}`)
+    }
+    expect(statuses.at(-1)!.kind).toBe('playing')
+  })
+
+  it('reports how many players are still missing', () => {
+    const { f, statuses } = room(4)
+    const missing = () => {
+      const st = statuses.at(-1)!
+      return st.kind === 'seating' ? st.waitingFor : 0
+    }
+
+    expect(missing()).toBe(3)
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    expect(missing()).toBe(2)
+    f.join('peer-2')
+    f.receive(hello('client-2'), 'peer-2')
+    expect(missing()).toBe(1)
+  })
+
+  it('starts two-handed play as soon as the one opponent arrives', () => {
+    const { f, statuses } = room(2)
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    expect(statuses.at(-1)!.kind).toBe('playing')
+  })
+
+  it('can start short-handed by filling the empty seats with bots', () => {
+    const { f, host, statuses, views } = room(4)
+    f.join('peer-1')
+    f.receive(hello('client-1'), 'peer-1')
+    expect(statuses.at(-1)!.kind).toBe('seating')
+
+    host.fillWithBots()
+    expect(statuses.at(-1)!.kind).toBe('playing')
+
+    // And the hand actually runs now.
+    let guard = 0
+    while (views.at(-1)!.phase === 'playing') {
+      if (guard++ > 500) throw new Error('stalled after filling with bots')
+      vi.advanceTimersByTime(100)
+      const v = views.at(-1)!
+      if (v.phase === 'playing' && v.turn === 0 && !v.resolving && v.hand.length > 0) {
+        host.play(v.hand[0]!.id)
+      } else if (v.phase === 'playing' && v.turn === 1 && !v.resolving) {
+        const seatView = v.seats.find(s => s.seat === 1)
+        if (seatView && seatView.cards > 0) {
+          // seat 1 is the human peer; play for it over the wire
+          const guestView = f.to('peer-1')
+            .filter(m => m.t === 'view')
+            .map(m => (m as { view: PublicView }).view)
+            .at(-1)
+          if (guestView?.hand[0]) f.receive({ t: 'play', card: guestView.hand[0].id }, 'peer-1')
+        }
+      }
+    }
+    expect(views.at(-1)!.phase).toBe('over')
+  })
+})

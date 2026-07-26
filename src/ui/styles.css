@@ -16,18 +16,61 @@
   --card-ratio: 420 / 694;
   --gap: clamp(6px, 2vw, 14px);
 
-  --felt: #0d4a2f;
-  --felt-deep: #072b1b;
-  --felt-edge: #0a3d27;
   --ink: #f4f1e8;
   --ink-muted: #a9bdb0;
   --gold: #e0b64a;
   --gold-dim: #a8843180;
   --danger: #c9524a;
-  --panel-bg: #10281dee;
   --radius: 10px;
 
+  /* One light source, up and slightly left, used by every shadow on the
+     table so cards read as lying on a surface rather than pasted onto it. */
+  --shadow-contact: 0 1px 2px #00000059;
+  --shadow-ambient: 0 6px 14px -4px #00000073;
+  --shadow-lifted: 0 14px 26px -6px #00000080;
+
   color-scheme: dark;
+}
+
+/* --- table themes ----------------------------------------------------------
+   Each theme is only a handful of variables: the cloth, its shading, the rail
+   and the panel tint. Everything else on the table derives from these. */
+
+:root,
+[data-table='green'] {
+  --felt: #0d4a2f;
+  --felt-deep: #072b1b;
+  --felt-lit: #176c44;
+  --rail: #4a2f18;
+  --rail-lit: #6b452339;
+  --panel-bg: #10281dee;
+}
+
+[data-table='burgundy'] {
+  --felt: #5a1220;
+  --felt-deep: #2c060e;
+  --felt-lit: #7d1c2d;
+  --rail: #3d2412;
+  --rail-lit: #6b452339;
+  --panel-bg: #2a0b12ee;
+}
+
+[data-table='midnight'] {
+  --felt: #16305c;
+  --felt-deep: #0a1730;
+  --felt-lit: #1f4480;
+  --rail: #24303f;
+  --rail-lit: #4a5c7239;
+  --panel-bg: #0e1c33ee;
+}
+
+[data-table='wood'] {
+  --felt: #6a4522;
+  --felt-deep: #35200e;
+  --felt-lit: #8a5c2e;
+  --rail: #2f1d0d;
+  --rail-lit: #6b452339;
+  --panel-bg: #2b1a0cee;
 }
 
 * {
@@ -43,7 +86,17 @@ body {
 }
 
 body {
-  background: radial-gradient(ellipse at 50% 0%, var(--felt) 0%, var(--felt-deep) 75%);
+  /* Woven felt, built from gradients alone so there is nothing to download.
+     Two fine diagonal weaves in opposite directions give the cloth its grain;
+     a broad radial lightens where the light falls and a vignette darkens the
+     corners so the surface reads as curved rather than flat. */
+  background-color: var(--felt);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% 8%, #ffffff14 0%, #00000000 55%),
+    radial-gradient(ellipse 140% 110% at 50% 45%, var(--felt-lit) 0%, var(--felt) 45%, var(--felt-deep) 100%),
+    repeating-linear-gradient(45deg, #ffffff08 0 1px, #00000000 1px 3px),
+    repeating-linear-gradient(-45deg, #00000012 0 1px, #00000000 1px 3px);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: ui-rounded, 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -363,6 +416,23 @@ body {
 
 /* --- the table ------------------------------------------------------------ */
 
+/* The rail: a warm band framing the cloth. Drawn as a border on a pseudo
+   element so it costs the layout nothing — the hands still get the full
+   height, which matters on a phone in landscape. */
+.table::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: clamp(5px, 1.4vw, 12px) solid var(--rail);
+  border-radius: clamp(10px, 3vw, 22px);
+  box-shadow:
+    inset 0 0 0 1px #00000059,
+    inset 0 1px 0 1px var(--rail-lit),
+    inset 0 0 40px 10px #00000038;
+  z-index: 6;
+}
+
 .table {
   position: relative;
   height: 100dvh;
@@ -431,6 +501,40 @@ body {
   justify-content: center;
   gap: var(--gap);
   min-height: calc(var(--card-w) / (var(--card-ratio)));
+}
+
+/* Your hand fans on an arc rather than sitting in a flat row — the flat row
+   was the single clearest tell that these were images on a page rather than
+   cards being held. --i is set per card by the renderer.
+
+   The fan needs its cards to overlap slightly, so the gap goes negative and
+   the arc is rebuilt from rotation plus a vertical drop. */
+.hand-mine {
+  gap: 0;
+  padding-top: calc(var(--card-w) * 0.1);
+  perspective: 900px;
+}
+.hand-mine .card {
+  /* Distance from the middle of the fan, and its magnitude. max(x, -x) is
+     abs() — the real abs() is too new to rely on. */
+  --fan: calc(var(--i, 0) - var(--mid, 1));
+  --fan-abs: max(var(--fan), calc(-1 * var(--fan)));
+  transform-origin: 50% 145%;
+  transform: rotate(calc(var(--fan) * 7deg))
+    translateY(calc(var(--fan-abs) * var(--card-w) * 0.045));
+  margin-inline: calc(var(--card-w) * -0.06);
+}
+.hand-mine .card:active:not(.is-disabled) {
+  transform: rotate(calc(var(--fan) * 7deg)) translateY(calc(var(--card-w) * -0.14));
+  box-shadow: var(--shadow-contact), var(--shadow-lifted), 0 0 0 2px var(--gold);
+  z-index: 5;
+}
+@media (hover: hover) {
+  .hand-mine .card-playable:not(.is-disabled):hover {
+    transform: rotate(calc(var(--fan) * 7deg)) translateY(calc(var(--card-w) * -0.16));
+    box-shadow: var(--shadow-contact), var(--shadow-lifted), 0 0 0 2px var(--gold);
+    z-index: 5;
+  }
 }
 
 /* Opponents ---------------------------------------------------------------
@@ -537,7 +641,14 @@ body {
   background: #fdfcf7;
   padding: 0;
   overflow: hidden;
-  box-shadow: 0 2px 5px #00000059, 0 0 0 1px #00000026;
+  /* Contact shadow tight under the card, ambient shadow soft and offset
+     downwards: one light source, above and slightly forward. A single flat
+     blur is what made cards look pasted on rather than resting on cloth. */
+  box-shadow:
+    inset 0 0 0 1px #00000014,
+    0 0 0 1px #0000001f,
+    var(--shadow-contact),
+    var(--shadow-ambient);
   flex: none;
   display: block;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
@@ -577,31 +688,27 @@ body {
   filter: brightness(0.82) saturate(0.8);
 }
 .hand-active .card-playable:not(.is-disabled) {
-  box-shadow: 0 2px 5px #00000059, 0 0 0 1px #00000026, 0 0 0 2px var(--gold);
+  box-shadow: var(--shadow-contact), var(--shadow-ambient), 0 0 0 2px var(--gold);
 }
-.card-playable:active:not(.is-disabled) {
-  transform: translateY(-8px) scale(1.03);
-}
+
 .card-playable:focus-visible {
   outline: 3px solid var(--gold);
   outline-offset: 2px;
 }
 
-/* Lift on hover only where hover actually exists — on touch this would stick. */
-@media (hover: hover) {
-  .card-playable:not(.is-disabled):hover {
-    transform: translateY(-10px);
-    box-shadow: 0 10px 18px #00000066, 0 0 0 2px var(--gold);
-  }
-}
+
 
 /* Board: stock on the left, trick centred in what remains ------------------ */
 
+/* The stock gets its own column so a fanned trick cannot run into it — an
+   overlap that is impossible by construction rather than by arithmetic. The
+   trick then centres in whatever is left, which is enough now that the stock
+   cluster is compact. */
 .board {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--gap);
+  gap: calc(var(--gap) * 0.5);
   min-height: 0;
   position: relative;
   /* Enough for the stock, the trick stack and the recap; anything beyond is
@@ -616,11 +723,22 @@ body {
 /* The deck and briscola are reference, not cards you play, so they run
    smaller than the hand — at full size they ate two thirds of the board and
    squeezed the trick off the right edge. */
+/* Compact corner cluster: the briscola tucks behind the deck and the counter
+   sits underneath. Laid out in a row it was wide enough for a four-card fan
+   to run into it. */
 .stock {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  --stock-scale: 0.6;
+  z-index: 1;
+}
+.stock-cards {
   display: flex;
   align-items: center;
-  gap: calc(var(--gap) * 0.4);
-  --stock-scale: 0.74;
+}
+.stock-cards > * + * {
+  margin-left: calc(var(--card-w) * var(--stock-scale) * -0.62);
 }
 .stock .card {
   width: calc(var(--card-w) * var(--stock-scale));
@@ -653,15 +771,13 @@ body {
 /* Turns remaining, not cards remaining — "how much game is left" is the
    question people actually have, and it keeps counting once the stock dries up. */
 .turns {
-  flex: none;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.05;
-  padding-left: 2px;
+  align-items: baseline;
+  gap: 0.2rem;
+  line-height: 1;
 }
 .turns-value {
-  font-size: 1.2rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: var(--gold);
   font-variant-numeric: tabular-nums;
@@ -720,7 +836,8 @@ body {
    seats are in play. */
 .trick {
   position: relative;
-  min-height: calc(var(--card-w) / (var(--card-ratio)) * 1.35);
+  width: 100%;
+  min-height: calc(var(--card-w) / (var(--card-ratio)) * 1.5);
   min-width: 0;
 }
 .played {
@@ -731,36 +848,68 @@ body {
   margin-top: calc(var(--card-w) / (var(--card-ratio)) * -0.5);
   animation: play-in 0.22s ease-out;
 }
-/* Each card sits towards whoever played it: you from below, the seat on your
-   left from the left, and so on. */
+/* Played cards fan out rather than piling on top of each other.
+   Stacked tightly they were unreadable at three and four players — the first
+   card ended up almost entirely hidden. Each still leans towards the seat
+   that played it, so you can tell whose is whose. */
 .played-from-0 {
-  transform: translate(0, calc(var(--card-w) * 0.3)) rotate(3deg);
+  transform: translate(calc(var(--card-w) * 0.05), calc(var(--card-w) * 0.34)) rotate(4deg);
   z-index: 4;
 }
 .played-from-1 {
-  transform: translate(calc(var(--card-w) * -0.3), 0) rotate(-6deg);
+  transform: translate(calc(var(--card-w) * -0.46), calc(var(--card-w) * 0.02)) rotate(-13deg);
   z-index: 3;
 }
 .played-from-2 {
-  transform: translate(0, calc(var(--card-w) * -0.3)) rotate(4deg);
+  transform: translate(calc(var(--card-w) * -0.06), calc(var(--card-w) * -0.34)) rotate(5deg);
   z-index: 2;
 }
 .played-from-3 {
-  transform: translate(calc(var(--card-w) * 0.3), 0) rotate(6deg);
+  transform: translate(calc(var(--card-w) * 0.46), calc(var(--card-w) * 0.02)) rotate(13deg);
   z-index: 3;
 }
-/* Head to head there is no left/right, so keep the original stagger. */
+/* Head to head there is no left and right, so lean them past each other. */
 .trick-2 .played-from-0 {
-  transform: translate(calc(var(--card-w) * 0.22), calc(var(--card-w) * 0.14)) rotate(4deg);
+  transform: translate(calc(var(--card-w) * 0.26), calc(var(--card-w) * 0.16)) rotate(6deg);
 }
 .trick-2 .played-from-1 {
-  transform: translate(calc(var(--card-w) * -0.22), calc(var(--card-w) * -0.14)) rotate(-5deg);
+  transform: translate(calc(var(--card-w) * -0.26), calc(var(--card-w) * -0.16)) rotate(-7deg);
+}
+/* Three-handed: spread them evenly rather than leaving a gap where the
+   fourth seat would be. */
+.trick-3 .played-from-1 {
+  transform: translate(calc(var(--card-w) * -0.44), calc(var(--card-w) * -0.1)) rotate(-12deg);
+}
+.trick-3 .played-from-2 {
+  transform: translate(calc(var(--card-w) * 0.44), calc(var(--card-w) * -0.1)) rotate(12deg);
+}
+/* The winning card, once the trick is complete. Ring, glow, a lift out of the
+   fan and everything else pushed back — at a four-handed table you otherwise
+   have to work out who took it from the suits alone. */
+.played-winner {
+  z-index: 6 !important;
 }
 .played-winner .card {
-  box-shadow: 0 0 0 3px var(--gold), 0 8px 20px #00000073;
+  box-shadow:
+    0 0 0 3px var(--gold),
+    0 0 18px 2px #e0b64a70,
+    var(--shadow-lifted);
+  animation: winner-pop 0.32s ease-out;
 }
 .trick-resolving .played:not(.played-winner) {
-  opacity: 0.7;
+  opacity: 0.55;
+  filter: saturate(0.65);
+}
+@keyframes winner-pop {
+  0% {
+    filter: brightness(1);
+  }
+  40% {
+    filter: brightness(1.22);
+  }
+  100% {
+    filter: brightness(1);
+  }
 }
 
 @keyframes play-in {
@@ -790,7 +939,9 @@ body {
   position: absolute;
   top: 0;
   right: 0;
-  --mini-w: calc(var(--card-w) * 0.42);
+  --mini-w: calc(var(--card-w) * 0.36);
+  z-index: 1;
+  opacity: 0.9;
 }
 .last-trick[hidden] {
   display: none;
@@ -1165,4 +1316,22 @@ body {
 }
 .menu-primary .menu-setup {
   color: #241a05c9;
+}
+
+/* Free-text name field in settings. */
+.name-input {
+  margin-top: 0.35rem;
+  min-height: 44px;
+  width: 100%;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--ink);
+  background: #00000038;
+  border: 1px solid #ffffff26;
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+}
+.name-input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
 }

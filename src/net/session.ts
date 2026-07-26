@@ -15,7 +15,7 @@ import { matchScores, newMatch, recordHand, type MatchState } from '../game/matc
 import { teamOf } from '../game/table'
 import { nextSeat, other, type Seat } from '../game/rules'
 import { randomSeed } from '../game/rng'
-import { DEFAULT_SETTINGS, type MatchSettings } from '../game/settings'
+import { cleanName, DEFAULT_SETTINGS, type MatchSettings } from '../game/settings'
 import type { PlayerCount } from '../game/table'
 import { isSoundId, type SoundId } from '../ui/sounds'
 import {
@@ -80,6 +80,8 @@ export type SessionStatus =
   | { kind: 'full' }
   /** Somebody dropped; their seat is being held open. */
   | { kind: 'awaiting'; seat: Seat; name?: string }
+  /** The table is short of players and cannot start yet. */
+  | { kind: 'seating'; waitingFor: number; players: number }
 
 export interface Session {
   readonly mode: SessionMode
@@ -162,6 +164,7 @@ function seatViews(
     const config = seats[i]
     return {
       seat: i,
+      name: config?.name ?? '',
       cards: hand.length,
       team,
       offset: (i - viewer + players) % players,
@@ -285,6 +288,10 @@ export class GameSession extends BaseSession {
     this.dealer = dealer
     this.state = newGame(seed, dealer, this.players)
     this.match = newMatch(settings.format, this.state.config.teams.length)
+    // Local seats are this player; label them so the others' boards agree.
+    for (const seat of this.seats) {
+      if (seat.control === 'local' && settings.name) seat.name = settings.name
+    }
     this.viewer = this.firstLocalSeat()
     this.mode = seats.some(s => s.control === 'remote')
       ? 'online'
@@ -511,16 +518,53 @@ export class HostSession extends GameSession {
     this.advance()
   }
 
-  /** Any seat still being held for a player who left stops the clock. */
+  /** Seats still expecting a human who has never arrived. */
+  private emptySeats(): Seat[] {
+    return this.seats.flatMap((s, i) =>
+      s.control === 'remote' && !s.peerId && s.awaitingSince === undefined ? [i] : [],
+    )
+  }
+
+  /** Everyone who is going to play is here. */
+  private tableIsFull(): boolean {
+    return this.emptySeats().length === 0
+  }
+
+  /**
+   * The clock stops while the table is short a player, or while a seat is
+   * being held for someone who dropped.
+   *
+   * The first of those is why a three-handed game used to deal the moment one
+   * opponent connected: nothing checked that the *third* seat had anybody in
+   * it, so two players started a game the third could never join.
+   */
   protected override isPaused(): boolean {
+    if (!this.tableIsFull()) return true
     const seat = this.seats[this.state.turn]
     return seat?.control === 'remote' && seat.awaitingSince !== undefined
   }
 
+  /** Fills the seats nobody has taken with bots and gets under way. */
+  fillWithBots() {
+    for (const seat of this.emptySeats()) this.seats[seat]!.control = 'ai'
+    this.announce()
+  }
+
+  /** Re-evaluates whether the game can run, and tells the UI either way. */
+  private announce() {
+    if (this.tableIsFull()) {
+      this.status({ kind: 'playing' })
+      this.broadcast()
+      this.advance()
+    } else {
+      this.status({ kind: 'seating', waitingFor: this.emptySeats().length, players: this.seats.length })
+      this.broadcast()
+    }
+  }
+
   override start() {
     this.broadcast()
-    this.status(this.transport.isConnected() ? { kind: 'playing' } : { kind: 'waiting' })
-    this.advance()
+    this.announce()
   }
 
   protected override broadcast(opts?: ViewOpts) {
@@ -551,9 +595,12 @@ export class HostSession extends GameSession {
           this.send({ t: 'full' }, from)
           return
         }
+        // Names arrive from a peer and land in everyone else's UI, so they go
+        // through the same cleaning as anything else off the wire.
+        const name = cleanName(m.name)
+        if (name) this.seats[seat]!.name = name
         this.send({ t: 'seated', seat, players: this.seats.length }, from)
-        this.broadcast()
-        this.advance()
+        this.announce()
         break
       }
       case 'play': {
@@ -620,7 +667,10 @@ export class HostSession extends GameSession {
 export class GuestSession extends BaseSession {
   readonly mode = 'online' as const
 
-  constructor(private transport: Transport) {
+  constructor(
+    private transport: Transport,
+    private name = '',
+  ) {
     super()
 
     transport.onMessage(msg => {
@@ -639,7 +689,11 @@ export class GuestSession extends BaseSession {
     })
 
     transport.onPeerJoin(() => {
-      this.transport.send({ t: 'hello', clientId: clientId() } satisfies ClientMsg)
+      this.transport.send({
+        t: 'hello',
+        clientId: clientId(),
+        ...(this.name ? { name: this.name } : {}),
+      } satisfies ClientMsg)
     })
 
     transport.onPeerLeave(() => {
@@ -650,7 +704,11 @@ export class GuestSession extends BaseSession {
   start() {
     this.status({ kind: 'waiting' })
     if (this.transport.isConnected()) {
-      this.transport.send({ t: 'hello', clientId: clientId() } satisfies ClientMsg)
+      this.transport.send({
+        t: 'hello',
+        clientId: clientId(),
+        ...(this.name ? { name: this.name } : {}),
+      } satisfies ClientMsg)
     }
   }
 

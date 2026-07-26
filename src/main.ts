@@ -79,6 +79,9 @@ function startTable(
       onHandoff: () => next.confirmHandoff(),
       onReact: emoji => next.react(emoji),
       onSound: sound => next.sound(sound),
+      onFillWithBots: () => {
+        if (next instanceof HostSession) next.fillWithBots()
+      },
       onDeck: deck => {
         // Remember the preference locally too, so the next game starts here.
         updateSettings({ ...settings, deck })
@@ -125,6 +128,8 @@ function hostOnline(code: string = makeRoomCode()) {
 
   transport.onPeerJoin(() => {
     // Only swap to the table the first time; a reconnect keeps the board up.
+    // The table may still be short of players — the seating overlay covers it
+    // until everyone has arrived.
     if (table) return
     startTable(s, 'online', code, () => s.start())
   })
@@ -138,7 +143,7 @@ function hostOnline(code: string = makeRoomCode()) {
 function joinOnline(rawCode: string) {
   const code = normaliseRoomCode(rawCode)
   const transport = connect(code)
-  const s = new GuestSession(transport)
+  const s = new GuestSession(transport, settings.name)
   startTable(s, 'online', code, () => s.start())
 }
 

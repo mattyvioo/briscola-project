@@ -1,7 +1,7 @@
 import { DIFFICULTIES, type Difficulty } from '../game/ai'
 import { DECK_IDS, deckStyle, type DeckId } from '../game/decks'
 import { MATCH_FORMATS, matchTarget, type MatchFormat } from '../game/match'
-import { DELAY_OPTIONS, type MatchSettings } from '../game/settings'
+import { cleanName, DELAY_OPTIONS, MAX_NAME_LENGTH, type MatchSettings } from '../game/settings'
 import { PLAYER_COUNTS, type PlayerCount } from '../game/table'
 import { isValidRoomCode, normaliseRoomCode, ROOM_CODE_LENGTH } from '../net/protocol'
 import { suitPip } from './card'
@@ -42,6 +42,22 @@ export function settingsPanel(
   const formatRow = el('div', { class: 'setting-options' })
   const difficultyRow = el('div', { class: 'setting-options' })
   const playersRow = el('div', { class: 'setting-options' })
+
+  // Name is a free-text field rather than a chip row, so it sits outside
+  // render() and is not rebuilt on every setting change — retyping into a
+  // recreated input would lose the caret.
+  const nameInput = el('input', {
+    class: 'name-input',
+    type: 'text',
+    maxlength: MAX_NAME_LENGTH,
+    placeholder: t.namePlaceholder,
+    'aria-label': t.yourName,
+    autocomplete: 'nickname',
+  })
+  nameInput.value = current.name
+  nameInput.addEventListener('input', () => {
+    update({ name: cleanName(nameInput.value) })
+  })
 
   const sameFormat = (a: MatchFormat, b: MatchFormat) =>
     a.kind === b.kind && matchTarget(a) === matchTarget(b)
@@ -146,6 +162,13 @@ export function settingsPanel(
     'details',
     { class: 'settings' },
     el('summary', {}, el('span', { text: t.settings }), el('span', { class: 'muted small', text: t.settingsHint })),
+    el(
+      'div',
+      { class: 'setting' },
+      el('span', { class: 'field-label', text: t.yourName }),
+      el('span', { class: 'muted small', text: t.yourNameHint }),
+      nameInput,
+    ),
     opts.showPace
       ? el(
           'div',

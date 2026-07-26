@@ -26,6 +26,8 @@ export interface TableCallbacks {
   onReact(emoji: Reaction): void
   onSound(sound: SoundId): void
   onDeck(deck: DeckId): void
+  /** Start anyway, with bots in the seats nobody took. */
+  onFillWithBots(): void
 }
 
 type Mode = 'online' | 'ai' | 'hotseat'
@@ -187,7 +189,8 @@ export class TableView {
     this.deckBtn.title = `${deckStyle(view.deck).label} — ${t.deckShared}`
 
     const { mine, theirs } = this.labels(view)
-    this.nameMine.textContent = mine
+    const me = view.seats.find(s => s.isMe)
+    this.nameMine.textContent = view.players === 4 ? mine : me?.name || mine
     this.nameTheirs.textContent = theirs
     this.hudMine.textContent = String(view.myPoints)
     this.hudTheirs.textContent = String(view.opponentPoints)
@@ -364,9 +367,13 @@ export class TableView {
           () => cardBack(),
         )
 
+        // With a chosen name, "compagno" moves to a marker so both facts fit.
         const name = this.seatLabel(view, seat)
-        node.querySelector('.seat-name')!.textContent =
-          seat.isPartner && seat.control === 'ai' ? `${name} 🤖` : name
+        const marks = `${seat.isPartner && seat.name ? ' ●' : ''}${
+          seat.control === 'ai' && seat.name ? ' 🤖' : ''
+        }${seat.isPartner && !seat.name && seat.control === 'ai' ? ' 🤖' : ''}`
+        node.querySelector('.seat-name')!.textContent = name + marks
+        node.title = seat.isPartner ? `${name} — ${t.partner}` : name
         // With partners the number is the *team's*, which is what you play for.
         node.querySelector('.seat-points')!.textContent = String(seat.points)
       },
@@ -382,6 +389,8 @@ export class TableView {
    * beside the name instead.
    */
   private seatLabel(view: PublicView, seat: PublicView['seats'][number]): string {
+    // A name someone chose beats any label we could invent for them.
+    if (seat.name) return seat.name
     if (seat.awaiting) return t.awaitingShort
     if (seat.isPartner) return t.partner
     if (view.players === 2) return seat.control === 'ai' ? t.botName : t.opponent
@@ -404,7 +413,10 @@ export class TableView {
       (node, _key, index) => {
         node.classList.toggle('is-disabled', !playable)
         node.toggleAttribute('disabled', !playable)
+        // Position in the fan, and where its middle is, so the arc stays
+        // symmetric as the hand shrinks in the last tricks.
         node.style.setProperty('--i', String(index))
+        node.style.setProperty('--mid', String((view.hand.length - 1) / 2))
       },
     )
     this.myHand.classList.toggle('hand-active', playable)
@@ -420,12 +432,12 @@ export class TableView {
 
     const faceDown = view.stockLeft - (view.trumpTaken ? 0 : 1)
 
-    if (faceDown > 0) {
-      this.stock.appendChild(el('div', { class: 'deck' }, cardBack()))
-    }
-
+    // Deck and briscola overlap into one small cluster so the trick has the
+    // whole width of the board to fan across.
+    const cards = el('div', { class: 'stock-cards' })
+    if (faceDown > 0) cards.appendChild(el('div', { class: 'deck' }, cardBack()))
     if (!view.trumpTaken) {
-      this.stock.appendChild(
+      cards.appendChild(
         el(
           'div',
           { class: 'trump' },
@@ -434,6 +446,7 @@ export class TableView {
         ),
       )
     }
+    if (cards.children.length > 0) this.stock.appendChild(cards)
 
     // Turns left, not cards left: "how much game is there still to play" is
     // what people actually want to know, and it keeps counting after the
@@ -473,9 +486,9 @@ export class TableView {
   /** A small recap of the previous trick, so you can check what was played. */
   private renderLastTrick(view: PublicView) {
     const last = view.lastTrick
-    // Hide it while the current trick is still on the table, otherwise the
-    // same two cards appear twice and it reads as a bug.
-    if (!last || view.resolving || view.phase === 'over') {
+    // Hidden whenever anything is on the table: the same cards would appear
+    // twice, and a fanned four-card trick reaches into the recap's corner.
+    if (!last || view.resolving || view.table.length > 0 || view.phase === 'over') {
       this.lastTrickBox.hidden = true
       clear(this.lastTrickBox)
       return
@@ -554,6 +567,9 @@ export class TableView {
     if (this.status.kind === 'disconnected') return this.showOverlay(this.disconnectedPanel())
     if (this.status.kind === 'full') return this.showOverlay(this.fullPanel())
     if (this.status.kind === 'awaiting') return this.showOverlay(this.awaitingPanel())
+    if (this.status.kind === 'seating') {
+      return this.showOverlay(this.seatingPanel(this.status.waitingFor, this.status.players))
+    }
     if (this.status.kind === 'waiting') return this.showOverlay(this.waitingPanel())
     if (v && v.phase === 'over' && !v.resolving) return this.showOverlay(this.resultPanel(v))
 
@@ -576,6 +592,24 @@ export class TableView {
       this.roomCode ? el('p', { class: 'muted', text: t.shareCode }) : null,
       this.roomCode ? el('div', { class: 'code code-lg', text: this.roomCode }) : null,
       this.ghostButton(t.leave, () => this.callbacks.onLeave()),
+    )
+  }
+
+  /** The table is short of players, so the deal has not happened yet. */
+  private seatingPanel(missing: number, players: number): HTMLElement {
+    return el(
+      'div',
+      { class: 'panel' },
+      el('div', { class: 'spinner', 'aria-hidden': 'true' }),
+      el('h2', { text: t.seatingTitle }),
+      el('p', { class: 'muted', text: t.seatingBody(missing, players) }),
+      this.roomCode ? el('div', { class: 'code code-lg', text: this.roomCode }) : null,
+      el(
+        'div',
+        { class: 'panel-actions' },
+        this.primaryButton(t.fillWithBots, () => this.callbacks.onFillWithBots()),
+        this.ghostButton(t.leave, () => this.callbacks.onLeave()),
+      ),
     )
   }
 

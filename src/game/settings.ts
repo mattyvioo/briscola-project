@@ -21,6 +21,8 @@ export interface MatchSettings {
   readonly players: PlayerCount
   /** How hard the computer seats play. */
   readonly difficulty: Difficulty
+  /** Shown to the other players. Empty means "just call me Tu". */
+  readonly name: string
 }
 
 export interface DelayOption {
@@ -46,9 +48,24 @@ export const DEFAULT_SETTINGS: MatchSettings = {
   format: { kind: 'single' },
   players: 2,
   difficulty: 'normal',
+  name: '',
 }
 
 const STORAGE_KEY = 'briscola.settings'
+
+/** Names come off the wire and land in other people's UI, so bound them. */
+export const MAX_NAME_LENGTH = 14
+
+export function cleanName(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  // Strip control characters and collapse whitespace; the UI sets it as
+  // textContent, so this is about legibility rather than escaping.
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_NAME_LENGTH)
+}
 
 /** Clamps anything loaded from storage or the network back into range. */
 export function normaliseSettings(value: unknown): MatchSettings {
@@ -60,6 +77,7 @@ export function normaliseSettings(value: unknown): MatchSettings {
     format: isMatchFormat(raw.format) ? raw.format : DEFAULT_SETTINGS.format,
     players: isPlayerCount(raw.players) ? raw.players : DEFAULT_SETTINGS.players,
     difficulty: isDifficulty(raw.difficulty) ? raw.difficulty : DEFAULT_SETTINGS.difficulty,
+    name: cleanName(raw.name),
   }
 }
 
