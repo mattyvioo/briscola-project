@@ -1,3 +1,4 @@
+import { DIFFICULTIES, type Difficulty } from '../game/ai'
 import { DECK_IDS, deckStyle, type DeckId } from '../game/decks'
 import { MATCH_FORMATS, matchTarget, type MatchFormat } from '../game/match'
 import { DELAY_OPTIONS, type MatchSettings } from '../game/settings'
@@ -39,6 +40,7 @@ export function settingsPanel(
   const paceRow = el('div', { class: 'setting-options' })
   const deckRow = el('div', { class: 'setting-options' })
   const formatRow = el('div', { class: 'setting-options' })
+  const difficultyRow = el('div', { class: 'setting-options' })
   const playersRow = el('div', { class: 'setting-options' })
 
   const sameFormat = (a: MatchFormat, b: MatchFormat) =>
@@ -58,6 +60,23 @@ export function settingsPanel(
           el('span', { class: 'chip-hint', text: n === 4 ? '2 v 2' : n === 3 ? 'a tre' : '1 v 1' }),
         )
         b.addEventListener('click', () => update({ players: n }))
+        return b
+      }),
+    )
+
+    difficultyRow.replaceChildren(
+      ...DIFFICULTIES.map((d: Difficulty) => {
+        const label = d === 'easy' ? t.diffEasy : d === 'hard' ? t.diffHard : t.diffNormal
+        const b = el(
+          'button',
+          {
+            class: `chip${d === current.difficulty ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-pressed': d === current.difficulty,
+          },
+          el('span', { class: 'chip-label', text: label }),
+        )
+        b.addEventListener('click', () => update({ difficulty: d }))
         return b
       }),
     )
@@ -134,6 +153,15 @@ export function settingsPanel(
           el('span', { class: 'field-label', text: t.players }),
           el('span', { class: 'muted small', text: t.playersHint }),
           playersRow,
+        )
+      : null,
+    opts.showPace
+      ? el(
+          'div',
+          { class: 'setting' },
+          el('span', { class: 'field-label', text: t.difficulty }),
+          el('span', { class: 'muted small', text: t.difficultyHint }),
+          difficultyRow,
         )
       : null,
     opts.showPace

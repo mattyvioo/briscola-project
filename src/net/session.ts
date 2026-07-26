@@ -390,7 +390,7 @@ export class GameSession extends BaseSession {
         if (this.state.phase !== 'playing') return
         if (this.seats[this.state.turn]?.control !== 'ai') return
         const s = this.state.turn
-        this.applyMove(s, chooseCard(this.state, s).id)
+        this.applyMove(s, chooseCard(this.state, s, this.settings.difficulty).id)
       }, AI_THINK_MS)
       return
     }

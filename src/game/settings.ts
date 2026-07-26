@@ -1,3 +1,4 @@
+import { isDifficulty, type Difficulty } from './ai'
 import { DEFAULT_DECK, isDeckId, type DeckId } from './decks'
 import { isMatchFormat, type MatchFormat } from './match'
 import { isPlayerCount, type PlayerCount } from './table'
@@ -18,6 +19,8 @@ export interface MatchSettings {
   readonly format: MatchFormat
   /** Seats at the table, human or otherwise. */
   readonly players: PlayerCount
+  /** How hard the computer seats play. */
+  readonly difficulty: Difficulty
 }
 
 export interface DelayOption {
@@ -42,6 +45,7 @@ export const DEFAULT_SETTINGS: MatchSettings = {
   deck: DEFAULT_DECK,
   format: { kind: 'single' },
   players: 2,
+  difficulty: 'normal',
 }
 
 const STORAGE_KEY = 'briscola.settings'
@@ -55,6 +59,7 @@ export function normaliseSettings(value: unknown): MatchSettings {
     deck: isDeckId(raw.deck) ? raw.deck : DEFAULT_SETTINGS.deck,
     format: isMatchFormat(raw.format) ? raw.format : DEFAULT_SETTINGS.format,
     players: isPlayerCount(raw.players) ? raw.players : DEFAULT_SETTINGS.players,
+    difficulty: isDifficulty(raw.difficulty) ? raw.difficulty : DEFAULT_SETTINGS.difficulty,
   }
 }
 
